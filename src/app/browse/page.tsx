@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { OpportunityCard } from '@/components/opportunity-card'
 import { CategoryFilter } from '@/components/category-filter'
 import { SearchInput } from '@/components/search-input'
 import { SortSelect, SortOption } from '@/components/sort-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Opportunity } from '@/types/database'
+import { Sparkles } from 'lucide-react'
 
 export default function BrowsePage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
@@ -14,6 +15,17 @@ export default function BrowsePage() {
   const [search, setSearch] = useState('')
   const [categories, setCategories] = useState<string[]>([])
   const [sort, setSort] = useState<SortOption>('score')
+
+  // Filter new opportunities (added in last 7 days)
+  const newOpportunities = useMemo(() => {
+    const now = new Date()
+    return opportunities.filter(opp => {
+      if (!opp.created_at) return false
+      const created = new Date(opp.created_at)
+      const diffDays = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+      return diffDays <= 7
+    })
+  }, [opportunities])
 
   useEffect(() => {
     fetchOpportunities()
@@ -59,6 +71,30 @@ export default function BrowsePage() {
 
           <CategoryFilter selected={categories} onChange={setCategories} />
         </div>
+
+        {/* New This Week Section */}
+        {!loading && newOpportunities.length > 0 && !search && categories.length === 0 && (
+          <div className="mb-12">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="flex items-center gap-2 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1">
+                <Sparkles className="h-4 w-4 text-white" />
+                <span className="text-sm font-medium text-white">New This Week</span>
+              </div>
+              <span className="text-sm text-zinc-500">{newOpportunities.length} fresh opportunities</span>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {newOpportunities.slice(0, 3).map((opp) => (
+                <OpportunityCard key={opp.id} opportunity={opp} />
+              ))}
+            </div>
+            {newOpportunities.length > 3 && (
+              <p className="mt-4 text-sm text-zinc-500">
+                + {newOpportunities.length - 3} more new opportunities below
+              </p>
+            )}
+            <div className="my-8 border-t border-zinc-800" />
+          </div>
+        )}
 
         {/* Results count */}
         <div className="mb-6 text-sm text-zinc-500">

@@ -2,13 +2,21 @@ import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Opportunity } from '@/types/database'
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Sparkles } from 'lucide-react'
 
 interface OpportunityCardProps {
   opportunity: Opportunity
 }
 
 export function OpportunityCard({ opportunity }: OpportunityCardProps) {
+  const isNew = () => {
+    if (!opportunity.created_at) return false
+    const created = new Date(opportunity.created_at)
+    const now = new Date()
+    const diffDays = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+    return diffDays <= 7
+  }
+
   const getTrendIcon = () => {
     if (opportunity.trend_score >= 7) {
       return <TrendingUp className="h-4 w-4 text-emerald-500" />
@@ -33,6 +41,14 @@ export function OpportunityCard({ opportunity }: OpportunityCardProps) {
   return (
     <Link href={`/opportunity/${opportunity.id}`}>
       <Card className="group relative overflow-hidden border-zinc-800 bg-zinc-900/50 p-5 transition-all hover:border-zinc-700 hover:bg-zinc-900">
+        {/* New Badge */}
+        {isNew() && (
+          <div className="absolute left-4 top-4 flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2 py-0.5 text-xs font-medium text-white">
+            <Sparkles className="h-3 w-3" />
+            New
+          </div>
+        )}
+
         {/* Score Badge */}
         <div
           className={`absolute right-4 top-4 flex h-12 w-12 items-center justify-center rounded-full border ${getScoreBgColor(opportunity.overall_score)}`}
@@ -43,7 +59,7 @@ export function OpportunityCard({ opportunity }: OpportunityCardProps) {
         </div>
 
         {/* Title */}
-        <h3 className="mb-2 pr-16 text-lg font-semibold text-white group-hover:text-emerald-400 transition-colors">
+        <h3 className={`mb-2 pr-16 text-lg font-semibold text-white group-hover:text-emerald-400 transition-colors ${isNew() ? 'mt-6' : ''}`}>
           {opportunity.title}
         </h3>
 
