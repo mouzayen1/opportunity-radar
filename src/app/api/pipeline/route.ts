@@ -288,34 +288,16 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
 
   for (const point of painPoints.slice(0, 20)) {
     try {
-      const prompt = `Analyze this pain point from ${point.source} and return JSON:
+      const prompt = `You are a startup idea analyst. Convert this complaint/discussion into a business opportunity.
 
+Source: ${point.source}
 Title: ${point.title}
-Text: ${point.text.slice(0, 500)}
-Engagement Score: ${point.score}
+Content: ${point.text.slice(0, 400)}
 
-Return ONLY valid JSON (no markdown, no code blocks):
-{
-  "isValid": true or false,
-  "reason": "why invalid if false",
-  "title": "Clean 3-7 word opportunity title",
-  "summary": "2-3 sentence summary of problem and opportunity",
-  "pain_score": 1-10,
-  "gap_score": 1-10,
-  "category": ["category1", "category2"],
-  "keywords": ["kw1", "kw2", "kw3"],
-  "competitor": {"name": "Name", "rating": 3.5, "weakness": "Main issue"},
-  "quote": "Best quote showing the pain"
-}
+Respond with ONLY this JSON (no other text):
+{"isValid":true,"title":"Short Opportunity Title","summary":"Brief description of the opportunity","pain_score":7,"gap_score":7,"category":["saas"],"keywords":["keyword1","keyword2"],"competitor":{"name":"Competitor","rating":3.5,"weakness":"Weakness"},"quote":"Key quote"}
 
-Categories: saas, developer-tools, productivity, finance, health, education, e-commerce, ai-ml, consumer, b2b, mobile, other
-
-Rules:
-- isValid:true if this represents a real frustration that software/tools could address
-- Be generous - look for the underlying opportunity even in technical complaints
-- pain_score 8-10 = severe daily impact, 5-7 = moderate, 1-4 = mild
-- gap_score 8-10 = no good solutions, 5-7 = flawed solutions exist, 1-4 = good solutions exist
-- If it's a feature request or complaint about existing tools, that's VALID - it shows a gap`
+Set isValid to true unless this is completely irrelevant (spam, off-topic). Categories: saas, developer-tools, productivity, finance, health, consumer, b2b, ai-ml, other`
 
       const result = await model.generateContent(prompt)
       const text = result.response.text()
