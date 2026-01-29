@@ -285,8 +285,12 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
 
   const opportunities = []
+  let processed = 0
+  let errors = 0
 
   for (const point of painPoints.slice(0, 20)) {
+    processed++
+    console.log(`Processing ${processed}/${Math.min(painPoints.length, 20)}: ${point.title.slice(0, 40)}...`)
     try {
       const prompt = `You are a startup idea analyst. Convert this complaint/discussion into a business opportunity.
 
@@ -301,10 +305,14 @@ Set isValid to true unless this is completely irrelevant (spam, off-topic). Cate
 
       const result = await model.generateContent(prompt)
       const text = result.response.text()
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      console.log('Gemini response:', text.slice(0, 200))
+
+      const jsonMatch = text.match(/\{[\s\S]*?\}/)
 
       if (jsonMatch) {
+        console.log('JSON match found:', jsonMatch[0].slice(0, 100))
         const analysis = JSON.parse(jsonMatch[0])
+        console.log('Parsed analysis, isValid:', analysis.isValid)
 
         if (analysis.isValid) {
           const trend_score = 5 + Math.floor(Math.random() * 4)
@@ -334,8 +342,10 @@ Set isValid to true unless this is completely irrelevant (spam, off-topic). Cate
       }
 
       await new Promise(r => setTimeout(r, 1000))
-    } catch (e) {
-      console.error('Gemini error:', e)
+    } catch (e: unknown) {
+      errors++
+      const errorMsg = e instanceof Error ? e.message : String(e)
+      console.error('Gemini error for', point.title.slice(0, 30), ':', errorMsg)
     }
   }
 
