@@ -7,13 +7,16 @@ const HN_API = 'https://hacker-news.firebaseio.com/v0'
 const DEVTO_API = 'https://dev.to/api'
 const SO_API = 'https://api.stackexchange.com/2.3'
 
-// Pain point keywords
+// Pain point keywords - be generous to find more opportunities
 const PAIN_KEYWORDS = [
   'frustrated', 'annoying', 'wish there was', 'why is there no',
   'hate', 'terrible', 'broken', 'need a better', 'looking for',
   'alternative to', 'problem with', 'struggle', 'difficult to',
   'waste time', 'spending hours', 'ask hn', 'help me', 'how do i',
-  'cant figure out', 'impossible to', 'nightmare', 'painful'
+  'cant figure out', 'impossible to', 'nightmare', 'painful',
+  'feature request', 'would be nice', 'suggestion', 'idea',
+  'bug', 'issue', 'error', 'doesn\'t work', 'not working',
+  'better way', 'easier way', 'should be', 'could be improved'
 ]
 
 interface PainPoint {
@@ -102,7 +105,7 @@ async function fetchGitHubPainPoints(limit: number = 15): Promise<PainPoint[]> {
         const text = (issue.title + ' ' + (issue.body || '')).toLowerCase()
         const hasPain = PAIN_KEYWORDS.some(kw => text.includes(kw))
 
-        if (hasPain && issue.comments > 2) {
+        if (hasPain && issue.comments >= 1) {
           painPoints.push({
             source: 'github',
             title: `[${repo.split('/')[1]}] ${issue.title}`,
@@ -283,7 +286,7 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
 
   const opportunities = []
 
-  for (const point of painPoints.slice(0, 15)) {
+  for (const point of painPoints.slice(0, 20)) {
     try {
       const prompt = `Analyze this pain point from ${point.source} and return JSON:
 
@@ -308,10 +311,11 @@ Return ONLY valid JSON (no markdown, no code blocks):
 Categories: saas, developer-tools, productivity, finance, health, education, e-commerce, ai-ml, consumer, b2b, mobile, other
 
 Rules:
-- isValid:true ONLY if this is a real problem software could solve
-- Reject vague complaints, already-solved problems, or personal issues
+- isValid:true if this represents a real frustration that software/tools could address
+- Be generous - look for the underlying opportunity even in technical complaints
 - pain_score 8-10 = severe daily impact, 5-7 = moderate, 1-4 = mild
-- gap_score 8-10 = no good solutions, 5-7 = flawed solutions exist, 1-4 = good solutions exist`
+- gap_score 8-10 = no good solutions, 5-7 = flawed solutions exist, 1-4 = good solutions exist
+- If it's a feature request or complaint about existing tools, that's VALID - it shows a gap`
 
       const result = await model.generateContent(prompt)
       const text = result.response.text()
