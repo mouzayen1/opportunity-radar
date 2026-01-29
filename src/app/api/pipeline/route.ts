@@ -287,12 +287,24 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
   const opportunities = []
   let processed = 0
   let errors = 0
+  let quotaExhausted = false
 
-  for (const point of painPoints.slice(0, 20)) {
+  // Process fewer items to stay within free tier limits (1500/day)
+  const maxItems = 10
+
+  for (const point of painPoints.slice(0, maxItems)) {
+    if (quotaExhausted) break
+
     processed++
-    console.log(`Processing ${processed}/${Math.min(painPoints.length, 20)}: ${point.title.slice(0, 40)}...`)
-    try {
-      const prompt = `You are a startup idea analyst. Convert this complaint/discussion into a business opportunity.
+    console.log(`Processing ${processed}/${Math.min(painPoints.length, maxItems)}: ${point.title.slice(0, 40)}...`)
+
+    // Retry logic with exponential backoff
+    let retries = 0
+    const maxRetries = 3
+
+    while (retries <= maxRetries) {
+      try {
+        const prompt = `You are a startup idea analyst. Convert this complaint/discussion into a business opportunity.
 
 Source: ${point.source}
 Title: ${point.title}
@@ -303,53 +315,73 @@ Respond with ONLY this JSON (no other text):
 
 Set isValid to true unless this is completely irrelevant (spam, off-topic). Categories: saas, developer-tools, productivity, finance, health, consumer, b2b, ai-ml, other`
 
-      const result = await model.generateContent(prompt)
-      const text = result.response.text()
-      console.log('Gemini response:', text.slice(0, 200))
+        const result = await model.generateContent(prompt)
+        const text = result.response.text()
+        console.log('Gemini response:', text.slice(0, 200))
 
-      const jsonMatch = text.match(/\{[\s\S]*?\}/)
+        const jsonMatch = text.match(/\{[\s\S]*?\}/)
 
-      if (jsonMatch) {
-        console.log('JSON match found:', jsonMatch[0].slice(0, 100))
-        const analysis = JSON.parse(jsonMatch[0])
-        console.log('Parsed analysis, isValid:', analysis.isValid)
+        if (jsonMatch) {
+          console.log('JSON match found:', jsonMatch[0].slice(0, 100))
+          const analysis = JSON.parse(jsonMatch[0])
+          console.log('Parsed analysis, isValid:', analysis.isValid)
 
-        if (analysis.isValid) {
-          const trend_score = 5 + Math.floor(Math.random() * 4)
-          const overall_score = Math.round(
-            (analysis.pain_score * 0.4 + trend_score * 0.3 + analysis.gap_score * 0.3) * 10
-          )
+          if (analysis.isValid) {
+            const trend_score = 5 + Math.floor(Math.random() * 4)
+            const overall_score = Math.round(
+              (analysis.pain_score * 0.4 + trend_score * 0.3 + analysis.gap_score * 0.3) * 10
+            )
 
-          opportunities.push({
-            title: analysis.title,
-            summary: analysis.summary,
-            pain_score: analysis.pain_score,
-            trend_score,
-            gap_score: analysis.gap_score,
-            overall_score,
-            category: analysis.category,
-            keywords: analysis.keywords,
-            sources: [{
-              platform: point.source,
-              url: point.url,
-              quote: analysis.quote || point.text.slice(0, 150),
-              author: point.author
-            }],
-            competitors: analysis.competitor ? [analysis.competitor] : [],
-            trend_data: generateTrendData()
-          })
+            opportunities.push({
+              title: analysis.title,
+              summary: analysis.summary,
+              pain_score: analysis.pain_score,
+              trend_score,
+              gap_score: analysis.gap_score,
+              overall_score,
+              category: analysis.category,
+              keywords: analysis.keywords,
+              sources: [{
+                platform: point.source,
+                url: point.url,
+                quote: analysis.quote || point.text.slice(0, 150),
+                author: point.author
+              }],
+              competitors: analysis.competitor ? [analysis.competitor] : [],
+              trend_data: generateTrendData()
+            })
+          }
+        }
+
+        // Success - wait before next request to respect rate limits
+        await new Promise(r => setTimeout(r, 2000))
+        break // Exit retry loop on success
+
+      } catch (e: unknown) {
+        const errorMsg = e instanceof Error ? e.message : String(e)
+
+        // Check if quota exhausted (daily limit)
+        if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+          console.error('Gemini quota exhausted - stopping analysis')
+          quotaExhausted = true
+          break
+        }
+
+        // Retry with backoff for other errors
+        retries++
+        if (retries <= maxRetries) {
+          const backoffMs = Math.pow(2, retries) * 1000 // 2s, 4s, 8s
+          console.log(`Retry ${retries}/${maxRetries} after ${backoffMs}ms for:`, point.title.slice(0, 30))
+          await new Promise(r => setTimeout(r, backoffMs))
+        } else {
+          errors++
+          console.error('Gemini error (max retries) for', point.title.slice(0, 30), ':', errorMsg)
         }
       }
-
-      await new Promise(r => setTimeout(r, 1000))
-    } catch (e: unknown) {
-      errors++
-      const errorMsg = e instanceof Error ? e.message : String(e)
-      console.error('Gemini error for', point.title.slice(0, 30), ':', errorMsg)
     }
   }
 
-  return opportunities
+  return { opportunities, quotaExhausted, processed, errors }
 }
 
 function generateTrendData() {
@@ -391,7 +423,9 @@ export async function GET(request: NextRequest) {
     sources: {} as Record<string, number>,
     totalPainPoints: 0,
     analyzed: 0,
-    added: 0
+    added: 0,
+    quotaExhausted: false,
+    errors: 0
   }
 
   try {
@@ -428,13 +462,23 @@ export async function GET(request: NextRequest) {
     const shuffled = allPainPoints.sort(() => Math.random() - 0.5)
 
     // Analyze with Gemini
-    const opportunities = await analyzeWithGemini(shuffled, geminiKey)
+    const geminiResult = await analyzeWithGemini(shuffled, geminiKey)
+    const opportunities = geminiResult.opportunities
     results.analyzed = opportunities.length
+    results.quotaExhausted = geminiResult.quotaExhausted
+    results.errors = geminiResult.errors
 
     console.log(`Analyzed ${opportunities.length} valid opportunities`)
 
+    if (geminiResult.quotaExhausted) {
+      console.log('Gemini quota exhausted - pipeline stopping early')
+    }
+
     if (opportunities.length === 0) {
-      return NextResponse.json({ message: 'No valid opportunities', ...results })
+      const message = geminiResult.quotaExhausted
+        ? 'Gemini API quota exhausted - try again tomorrow'
+        : 'No valid opportunities'
+      return NextResponse.json({ message, ...results })
     }
 
     // Save to Supabase
