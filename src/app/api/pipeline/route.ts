@@ -293,8 +293,8 @@ async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string) {
   let quotaExhausted = false
   let lastError: string | null = null
 
-  // Process 10 items per run - Groq has 14,400 req/day free tier!
-  const maxItems = 10
+  // Process all items - Groq has 14,400 req/day free tier!
+  const maxItems = 50
 
   for (const point of painPoints.slice(0, maxItems)) {
     if (quotaExhausted) break
