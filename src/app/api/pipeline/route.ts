@@ -4,64 +4,80 @@ import Groq from 'groq-sdk'
 
 // API endpoints
 const HN_API = 'https://hacker-news.firebaseio.com/v0'
-const SO_API = 'https://api.stackexchange.com/2.3'
-const REDDIT_API = 'https://www.reddit.com'
 
-// ============ QUALITY-FOCUSED KEYWORDS ============
-// These indicate REAL business pain, not coding questions
-const BUSINESS_PAIN_KEYWORDS = [
-  // Workflow/productivity pain
-  'waste hours', 'waste time', 'spending hours', 'takes forever',
-  'tedious', 'repetitive', 'manual process', 'manually',
-
-  // Tool/solution seeking
-  'looking for a tool', 'looking for software', 'need a solution',
-  'is there a tool', 'is there an app', 'is there a service',
-  'alternative to', 'replacement for', 'something like',
+// ============ STRICT BUSINESS PAIN INDICATORS ============
+// Only accept content that EXPLICITLY mentions wanting a tool/solution
+const EXPLICIT_SOLUTION_SEEKING = [
+  'looking for a tool', 'looking for software', 'looking for an app',
+  'need a tool', 'need software', 'need an app', 'need a solution',
+  'is there a tool', 'is there an app', 'is there software',
+  'does anyone know of', 'can anyone recommend', 'recommendations for',
+  'alternative to', 'replacement for', 'something like', 'similar to',
   'wish there was', 'why is there no', 'someone should build',
-
-  // Business/workflow frustration
-  'frustrated with', 'annoying', 'painful', 'nightmare',
-  'struggle with', 'difficult to manage', 'hard to track',
-  'cant keep track', 'losing track', 'disorganized',
-
-  // Specific business needs
-  'automate', 'automation', 'streamline', 'simplify',
-  'dashboard', 'tracking', 'monitoring', 'reporting',
-  'collaboration', 'team', 'workflow', 'process',
-
-  // Startup/indie specific
-  'side project', 'indie hacker', 'solo founder', 'bootstrapped',
-  'mvp', 'launch', 'validate', 'customers', 'users',
-  'monetize', 'revenue', 'pricing', 'saas'
+  'would pay for', 'shut up and take my money', 'take my money',
+  'i would use', 'we would use', 'our team needs',
+  'built a tool', 'built an app', 'building a', 'working on a',
+  'launched', 'shipping', 'side project', 'show hn', 'ask hn'
 ]
 
-// Keywords that indicate this is NOT a business opportunity (filter out)
-const CODING_QUESTION_PATTERNS = [
-  /how (?:do|can|to) i .{0,30}(?:in|with|using) (?:javascript|python|react|node|typescript|java|c\+\+|ruby|go|rust|php)/i,
-  /what (?:does|is) .{0,30}(?:mean|do|return)/i,
-  /why (?:does|is|am i getting) .{0,30}(?:error|undefined|null|nan)/i,
-  /(?:syntax|type|reference|runtime) error/i,
-  /how to (?:install|import|require|use|call|define|declare)/i,
+// HARD REJECT: If ANY of these patterns match, it's NOT an opportunity
+const HARD_REJECT_PATTERNS = [
+  // Coding syntax questions
+  /how (?:do|can|to) (?:i|you|we) .{0,50}(?:in|with|using) (?:javascript|python|react|node|typescript|java|c\+\+|ruby|go|rust|php|css|html|sql)/i,
+  /what (?:does|is|are) .{0,30}(?:mean|do|return|work)/i,
+  /why (?:does|is|am i getting|do i get) .{0,30}(?:error|undefined|null|nan|exception)/i,
+  /(?:syntax|type|reference|runtime|compile) error/i,
+  /how to (?:install|import|require|use|call|define|declare|implement|create|make|write|read|parse|convert|loop|iterate)/i,
   /difference between .{0,30} and /i,
   /convert .{0,30} to /i,
-  /parse .{0,30} (?:json|xml|html|csv)/i,
-  /loop through|iterate over|foreach/i,
-  /undefined is not|cannot read property|typeerror|referenceerror/i,
-  /npm install|pip install|yarn add/i,
-  /\bapi\b.{0,20}(?:endpoint|request|response|call)/i,
+  /parse .{0,30} (?:json|xml|html|csv|string|int|float)/i,
+  /loop through|iterate over|for ?each|map over/i,
+  /undefined is not|cannot read property|typeerror|referenceerror|syntaxerror/i,
+  /npm install|pip install|yarn add|cargo add|gem install/i,
+  /\bapi\b.{0,20}(?:endpoint|request|response|call|fetch)/i,
+  /merge .{0,20}(?:dict|array|object|list|hash)/i,
+  /remove .{0,20}(?:item|element|property|key) from/i,
+  /check if .{0,20}(?:file|element|variable|object) (?:exists|is)/i,
+  /redirect .{0,20}(?:to|from|user|page)/i,
+  /get .{0,20}(?:value|element|property|key|item) from/i,
+  /set .{0,20}(?:value|property|attribute)/i,
+  /add .{0,20}(?:item|element|class|event) to/i,
+
+  // Framework-specific bugs (these are for the framework maintainers, not products)
+  /next\.?js .{0,30}(?:bug|issue|error|problem|not working)/i,
+  /react .{0,30}(?:bug|issue|error|problem|hooks?)/i,
+  /vue .{0,30}(?:bug|issue|error|problem)/i,
+  /angular .{0,30}(?:bug|issue|error|problem)/i,
+  /typescript .{0,30}(?:bug|issue|error|problem)/i,
+  /webpack .{0,30}(?:bug|issue|error|config)/i,
+  /vite .{0,30}(?:bug|issue|error|config)/i,
+  /(?:app router|pages router|server component|client component).{0,30}(?:issue|bug|error|not working)/i,
+  /(?:framer motion|css module|tailwind).{0,30}(?:issue|bug|error|not working)/i,
+  /breakpoint.{0,20}(?:not|doesn't|won't) (?:work|land|hit)/i,
+  /prerender.{0,20}(?:error|fail|issue)/i,
+  /hydration .{0,20}(?:error|mismatch|fail)/i,
+
+  // Too basic/generic
+  /^how do i/i,
+  /^what is the/i,
+  /^why does/i,
+  /^can i/i,
+  /^is it possible to/i
 ]
 
-// Repos/sources that produce noise (framework feature requests, not products)
-const BLOCKED_GITHUB_REPOS = [
-  'vercel/next.js',
-  'facebook/react',
-  'vuejs/vue',
-  'angular/angular',
-  'sveltejs/svelte',
-  'microsoft/typescript',
-  'nodejs/node',
-  'python/cpython',
+// Titles that are clearly coding utilities, not business products
+const CODING_UTILITY_NAMES = [
+  /dict.?merge/i, /array.?merge/i, /object.?merge/i,
+  /file.?check/i, /path.?check/i, /exist.?check/i,
+  /page.?redirect/i, /url.?redirect/i,
+  /visibility.?manager/i, /element.?manager/i,
+  /property.?remov/i, /key.?remov/i,
+  /json.?pars/i, /xml.?pars/i, /csv.?pars/i,
+  /string.?format/i, /date.?format/i,
+  /async.?helper/i, /promise.?helper/i,
+  /hook.?manager/i, /state.?manager/i,
+  /css.?resolv/i, /style.?resolv/i,
+  /^[A-Z][a-z]+(?:Merge|Check|Parse|Format|Helper|Manager|Resolver|Handler|Wrapper|Util)$/
 ]
 
 interface PainPoint {
@@ -74,15 +90,6 @@ interface PainPoint {
   sourceQuality: 'high' | 'medium' | 'low'
 }
 
-interface AnalysisResult {
-  opportunities: Opportunity[]
-  quotaExhausted: boolean
-  processed: number
-  rejected: number
-  errors: number
-  lastError: string | null
-}
-
 interface Opportunity {
   title: string
   summary: string
@@ -92,48 +99,44 @@ interface Opportunity {
   overall_score: number
   category: string[]
   keywords: string[]
-  sources: Array<{
-    platform: string
-    url: string
-    quote: string
-    author: string
-  }>
-  competitors: Array<{
-    name: string
-    rating: number
-    weakness: string
-  }>
+  sources: Array<{ platform: string; url: string; quote: string; author: string }>
+  competitors: Array<{ name: string; rating: number; weakness: string }>
   trend_data: Array<{ date: string; value: number }>
   unique_angle?: string
   target_audience?: string
   monetization_potential?: string
 }
 
-// ============ PRE-FILTER: Remove obvious coding questions ============
-function isCodingQuestion(title: string, text: string): boolean {
+// ============ STRICT PRE-FILTER ============
+function isDefinitelyNotAnOpportunity(title: string, text: string): boolean {
   const combined = (title + ' ' + text).toLowerCase()
+  const titleLower = title.toLowerCase()
 
-  // Check against coding question patterns
-  for (const pattern of CODING_QUESTION_PATTERNS) {
+  // Check hard reject patterns
+  for (const pattern of HARD_REJECT_PATTERNS) {
     if (pattern.test(combined)) {
+      console.log(`  ✗ HARD REJECT (pattern): ${title.slice(0, 40)}`)
       return true
     }
   }
 
-  // Check for common coding question starters
-  const codingStarters = [
-    'how do i', 'how can i', 'how to', 'what is the',
-    'why does', 'why is my', 'why am i getting',
-    'error when', 'exception when', 'failed to',
-    'cannot', "can't", 'unable to'
-  ]
+  // Check if title looks like a coding utility name
+  for (const pattern of CODING_UTILITY_NAMES) {
+    if (pattern.test(title)) {
+      console.log(`  ✗ HARD REJECT (utility name): ${title.slice(0, 40)}`)
+      return true
+    }
+  }
 
-  const lowerTitle = title.toLowerCase()
-  for (const starter of codingStarters) {
-    if (lowerTitle.startsWith(starter)) {
-      // Check if it's about a workflow vs syntax
-      const workflowWords = ['automate', 'workflow', 'process', 'team', 'manage', 'track', 'organize']
-      if (!workflowWords.some(w => combined.includes(w))) {
+  // If title is very short (1-3 words) and doesn't contain business words, reject
+  const words = title.split(/\s+/)
+  if (words.length <= 3) {
+    const businessWords = ['saas', 'platform', 'service', 'business', 'startup', 'company', 'revenue', 'customer', 'client', 'market']
+    if (!businessWords.some(bw => titleLower.includes(bw))) {
+      // Could be a utility name - check if it contains technical terms
+      const techTerms = ['api', 'css', 'html', 'json', 'sql', 'http', 'dom', 'xml', 'cli', 'sdk', 'jwt', 'oauth']
+      if (techTerms.some(tt => titleLower.includes(tt))) {
+        console.log(`  ✗ HARD REJECT (short technical title): ${title}`)
         return true
       }
     }
@@ -142,26 +145,26 @@ function isCodingQuestion(title: string, text: string): boolean {
   return false
 }
 
-// ============ PRE-FILTER: Check if has business potential ============
-function hasBusinessPotential(title: string, text: string): boolean {
+// ============ CHECK FOR EXPLICIT SOLUTION SEEKING ============
+function isExplicitlySolutionSeeking(title: string, text: string): boolean {
   const combined = (title + ' ' + text).toLowerCase()
-  return BUSINESS_PAIN_KEYWORDS.some(kw => combined.includes(kw))
+  return EXPLICIT_SOLUTION_SEEKING.some(phrase => combined.includes(phrase))
 }
 
-// ============ HACKER NEWS (High Quality Source) ============
-async function fetchHNPainPoints(limit: number = 20): Promise<PainPoint[]> {
+// ============ HACKER NEWS (Primary Source) ============
+async function fetchHNPainPoints(limit: number = 25): Promise<PainPoint[]> {
   const painPoints: PainPoint[] = []
 
   try {
-    // Fetch from Ask HN (best for pain points)
+    // Ask HN is the best source - people explicitly asking for solutions
     const askRes = await fetch(`${HN_API}/askstories.json`)
     const askIds: number[] = askRes.ok ? await askRes.json() : []
 
-    // Also fetch Show HN for competitor research
+    // Show HN shows what people are building (validates demand exists)
     const showRes = await fetch(`${HN_API}/showstories.json`)
     const showIds: number[] = showRes.ok ? await showRes.json() : []
 
-    const allIds = [...askIds.slice(0, 50), ...showIds.slice(0, 30)]
+    const allIds = [...askIds.slice(0, 60), ...showIds.slice(0, 40)]
 
     for (const id of allIds) {
       if (painPoints.length >= limit) break
@@ -174,14 +177,17 @@ async function fetchHNPainPoints(limit: number = 20): Promise<PainPoint[]> {
       const title = item.title
       const text = item.text || ''
 
-      // Skip coding questions
-      if (isCodingQuestion(title, text)) continue
+      // STRICT: Hard reject coding questions
+      if (isDefinitelyNotAnOpportunity(title, text)) continue
 
-      // Must have business pain indicators
-      if (!hasBusinessPotential(title, text)) continue
+      // STRICT: Must explicitly seek a solution
+      if (!isExplicitlySolutionSeeking(title, text)) {
+        // Exception: Show HN posts demonstrate demand
+        if (!title.toLowerCase().includes('show hn')) continue
+      }
 
-      // Higher score threshold for quality
-      if (item.score >= 20) {
+      // Higher score threshold
+      if (item.score >= 15) {
         painPoints.push({
           source: 'hackernews',
           title: title,
@@ -189,7 +195,7 @@ async function fetchHNPainPoints(limit: number = 20): Promise<PainPoint[]> {
           url: `https://news.ycombinator.com/item?id=${item.id}`,
           author: item.by || 'anonymous',
           score: item.score,
-          sourceQuality: item.score > 100 ? 'high' : 'medium'
+          sourceQuality: item.score > 100 ? 'high' : item.score > 50 ? 'medium' : 'low'
         })
       }
 
@@ -202,234 +208,27 @@ async function fetchHNPainPoints(limit: number = 20): Promise<PainPoint[]> {
   return painPoints
 }
 
-// ============ REDDIT (New High Quality Source) ============
-async function fetchRedditPainPoints(limit: number = 20): Promise<PainPoint[]> {
-  const painPoints: PainPoint[] = []
-
-  // Subreddits with real business/startup pain points
-  const subreddits = [
-    'SaaS',           // SaaS founders discussing tools and problems
-    'startups',       // Startup discussions
-    'Entrepreneur',   // Business pain points
-    'indiehackers',   // Indie hackers building products
-    'smallbusiness',  // Small business owners
-    'freelance',      // Freelancer pain points
-    'webdev',         // Web dev workflow issues (not coding questions)
-    'ProductManagement' // PM workflow issues
-  ]
-
-  try {
-    for (const subreddit of subreddits) {
-      if (painPoints.length >= limit) break
-
-      const res = await fetch(
-        `${REDDIT_API}/r/${subreddit}/hot.json?limit=25&raw_json=1`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        }
-      )
-
-      if (!res.ok) continue
-      const data = await res.json()
-      const posts = data?.data?.children || []
-
-      for (const { data: post } of posts) {
-        if (painPoints.length >= limit) break
-
-        // Skip pinned/stickied posts
-        if (post.stickied) continue
-
-        const title = post.title || ''
-        const text = post.selftext || ''
-
-        // Skip coding questions
-        if (isCodingQuestion(title, text)) continue
-
-        // Must have business pain indicators
-        if (!hasBusinessPotential(title, text)) continue
-
-        // Upvote threshold
-        if (post.ups >= 15) {
-          painPoints.push({
-            source: `reddit:${subreddit}`,
-            title: title,
-            text: text.slice(0, 1000) || title,
-            url: `https://reddit.com${post.permalink}`,
-            author: post.author || 'anonymous',
-            score: post.ups,
-            sourceQuality: post.ups > 100 ? 'high' : 'medium'
-          })
-        }
-      }
-
-      await new Promise(r => setTimeout(r, 1000)) // Reddit rate limiting
-    }
-  } catch (e) {
-    console.error('Reddit fetch error:', e)
-  }
-
-  return painPoints
-}
-
-// ============ GITHUB (Filtered for Quality) ============
-async function fetchGitHubPainPoints(limit: number = 15): Promise<PainPoint[]> {
-  const painPoints: PainPoint[] = []
-
-  // Focus on TOOL repos where users complain about workflows, not framework repos
-  const repos = [
-    'notion-enhancer/notion-enhancer',  // Notion power users
-    'linear/linear',                     // Project management
-    'calcom/cal.com',                    // Scheduling
-    'posthog/posthog',                   // Analytics
-    'plausible/analytics',               // Analytics
-    'n8n-io/n8n',                        // Automation
-    'nocodb/nocodb',                     // Database UI
-    'appwrite/appwrite',                 // Backend service
-    'strapi/strapi',                     // CMS
-    'directus/directus'                  // Data platform
-  ]
-
-  try {
-    for (const repo of repos) {
-      if (painPoints.length >= limit) break
-
-      // Skip blocked repos (frameworks)
-      if (BLOCKED_GITHUB_REPOS.some(blocked => repo.includes(blocked.split('/')[1]))) {
-        continue
-      }
-
-      // Fetch issues without requiring specific labels (many repos don't use them)
-      const res = await fetch(
-        `https://api.github.com/repos/${repo}/issues?state=open&sort=comments&per_page=15`,
-        {
-          headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'OpportunityRadar'
-          }
-        }
-      )
-
-      if (!res.ok) continue
-      const issues = await res.json()
-
-      for (const issue of issues) {
-        if (painPoints.length >= limit) break
-        if (issue.pull_request) continue
-
-        const title = issue.title || ''
-        const text = issue.body || ''
-
-        // Skip coding questions / bug reports
-        if (isCodingQuestion(title, text)) continue
-        if (title.toLowerCase().includes('bug') || title.toLowerCase().includes('error')) continue
-
-        // Must have business pain indicators OR be a feature request with good engagement
-        const hasBusinessPain = hasBusinessPotential(title, text)
-        const hasGoodEngagement = issue.comments >= 5 && issue.reactions?.['+1'] >= 3
-
-        if (hasBusinessPain || hasGoodEngagement) {
-          painPoints.push({
-            source: 'github',
-            title: `[${repo.split('/')[1]}] ${title}`,
-            text: text.slice(0, 800) || title,
-            url: issue.html_url,
-            author: issue.user?.login || 'anonymous',
-            score: (issue.comments || 0) * 10 + (issue.reactions?.['+1'] || 0) * 5,
-            sourceQuality: issue.comments > 20 ? 'high' : 'medium'
-          })
-        }
-      }
-
-      await new Promise(r => setTimeout(r, 500))
-    }
-  } catch (e) {
-    console.error('GitHub fetch error:', e)
-  }
-
-  return painPoints
-}
-
-// ============ STACK OVERFLOW (Heavily Filtered) ============
-async function fetchStackOverflowPainPoints(limit: number = 10): Promise<PainPoint[]> {
-  const painPoints: PainPoint[] = []
-
-  // ONLY look for workflow/tooling questions, not syntax questions
-  // Use specific tags that indicate workflow issues
-  const workflowTags = [
-    'automation',
-    'continuous-integration',
-    'deployment',
-    'workflow',
-    'project-management'
-  ]
-
-  try {
-    for (const tag of workflowTags) {
-      if (painPoints.length >= limit) break
-
-      const res = await fetch(
-        `${SO_API}/questions?order=desc&sort=votes&tagged=${tag}&site=stackoverflow&filter=withbody&pagesize=15`
-      )
-
-      if (!res.ok) continue
-      const data = await res.json()
-
-      for (const q of data.items || []) {
-        if (painPoints.length >= limit) break
-
-        const title = q.title || ''
-        const body = q.body?.replace(/<[^>]*>/g, '') || ''
-
-        // STRICT: Must be about workflow, not code
-        if (isCodingQuestion(title, body)) continue
-
-        // Very high vote threshold - only widely experienced pain
-        if (q.score < 100) continue
-
-        // Must have business/workflow indicators
-        if (!hasBusinessPotential(title, body)) continue
-
-        painPoints.push({
-          source: 'stackoverflow',
-          title: title,
-          text: body.slice(0, 500),
-          url: q.link,
-          author: q.owner?.display_name || 'anonymous',
-          score: q.score,
-          sourceQuality: q.score > 500 ? 'high' : 'medium'
-        })
-      }
-
-      await new Promise(r => setTimeout(r, 500))
-    }
-  } catch (e) {
-    console.error('StackOverflow fetch error:', e)
-  }
-
-  return painPoints
-}
-
-// ============ INDIE HACKERS (via HN "Show HN" + keyword search) ============
-async function fetchIndieHackerPainPoints(limit: number = 10): Promise<PainPoint[]> {
+// ============ INDIE HACKER SEARCH (Secondary Source) ============
+async function fetchIndieHackerPainPoints(limit: number = 15): Promise<PainPoint[]> {
   const painPoints: PainPoint[] = []
 
   try {
-    // Search HN for indie hacker discussions
+    // Search for explicit business/product discussions
     const searchTerms = [
-      'indie hacker',
-      'side project',
-      'bootstrapped',
-      'launched my',
-      'built this'
+      'looking for a tool',
+      'need a solution for',
+      'wish there was',
+      'would pay for',
+      'built a saas',
+      'launched my startup',
+      'side project revenue'
     ]
 
     for (const term of searchTerms) {
       if (painPoints.length >= limit) break
 
       const res = await fetch(
-        `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(term)}&tags=story&hitsPerPage=20`
+        `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(term)}&tags=story&hitsPerPage=15`
       )
 
       if (!res.ok) continue
@@ -439,14 +238,16 @@ async function fetchIndieHackerPainPoints(limit: number = 10): Promise<PainPoint
         if (painPoints.length >= limit) break
 
         const title = hit.title || ''
-        const text = hit.story_text || title
+        const text = hit.story_text || ''
 
-        // Look for pain points in the comments/discussion
-        if (hit.points >= 30) {
+        // STRICT: Hard reject
+        if (isDefinitelyNotAnOpportunity(title, text)) continue
+
+        if (hit.points >= 20) {
           painPoints.push({
             source: 'indiehackers',
             title: title,
-            text: text,
+            text: text || title,
             url: `https://news.ycombinator.com/item?id=${hit.objectID}`,
             author: hit.author || 'anonymous',
             score: hit.points,
@@ -464,11 +265,50 @@ async function fetchIndieHackerPainPoints(limit: number = 10): Promise<PainPoint
   return painPoints
 }
 
-// ============ CRITICAL AI ANALYSIS ============
-async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string): Promise<AnalysisResult> {
-  const keyPreview = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}` : 'NO KEY'
-  console.log('Groq API Key:', keyPreview)
+// ============ WITHIN-BATCH DUPLICATE CHECK ============
+function removeBatchDuplicates(painPoints: PainPoint[]): PainPoint[] {
+  const seen = new Set<string>()
+  const unique: PainPoint[] = []
 
+  for (const point of painPoints) {
+    // Normalize title for comparison
+    const normalized = point.title.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .sort()
+      .join(' ')
+
+    // Check for similar existing
+    let isDupe = false
+    for (const seenTitle of seen) {
+      const similarity = calculateTitleSimilarity(normalized, seenTitle)
+      if (similarity > 0.5) { // 50% word overlap = duplicate
+        console.log(`  ✗ Batch duplicate: "${point.title.slice(0, 30)}" ~ "${seenTitle.slice(0, 30)}"`)
+        isDupe = true
+        break
+      }
+    }
+
+    if (!isDupe) {
+      seen.add(normalized)
+      unique.push(point)
+    }
+  }
+
+  return unique
+}
+
+function calculateTitleSimilarity(a: string, b: string): number {
+  const wordsA = new Set(a.split(' '))
+  const wordsB = new Set(b.split(' '))
+  const intersection = [...wordsA].filter(w => wordsB.has(w)).length
+  const union = new Set([...wordsA, ...wordsB]).size
+  return union > 0 ? intersection / union : 0
+}
+
+// ============ ULTRA-STRICT AI ANALYSIS ============
+async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string) {
   const groq = new Groq({ apiKey })
 
   const opportunities: Opportunity[] = []
@@ -478,8 +318,7 @@ async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string): Promise
   let quotaExhausted = false
   let lastError: string | null = null
 
-  // Process all collected pain points
-  const maxItems = 50
+  const maxItems = 40
 
   for (const point of painPoints.slice(0, maxItems)) {
     if (quotaExhausted) break
@@ -492,55 +331,58 @@ async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string): Promise
 
     while (retries <= maxRetries) {
       try {
-        // CRITICAL PROMPT - Very strict rejection criteria
-        const prompt = `You are a CRITICAL startup opportunity analyst. Your job is to REJECT bad ideas and only accept genuinely buildable business opportunities.
+        // ULTRA-STRICT PROMPT
+        const prompt = `You are an EXTREMELY SKEPTICAL startup analyst. Your DEFAULT answer is NO - this is NOT an opportunity.
 
-ANALYZE THIS:
-Source: ${point.source} (Quality: ${point.sourceQuality})
+ANALYZE THIS CONTENT:
+Source: ${point.source}
 Title: "${point.title}"
-Content: ${point.text.slice(0, 600)}
-Engagement Score: ${point.score}
+Content: ${point.text.slice(0, 500)}
+Upvotes: ${point.score}
 
-REJECTION CRITERIA (set isValid: false if ANY apply):
-1. CODING QUESTION: Is this just asking how to do something in code? (e.g., "how to parse JSON", "remove item from array")
-2. FRAMEWORK BUG: Is this a bug report or feature request for a framework that the framework maintainers should fix?
-3. TOO VAGUE: Is this too generic to build a product around? (e.g., "make things easier")
-4. SATURATED MARKET: Are there already 10+ well-funded competitors with no clear differentiation possible?
-5. NOT A PRODUCT: Is this a one-time task, not a recurring need? (e.g., "migrate my data once")
-6. TOO NICHE: Would the total addressable market be under 1,000 potential paying customers?
-7. REQUIRES HUGE SCALE: Does this only work with massive network effects or data that a startup can't get?
+YOUR JOB: Decide if this is a REAL business opportunity worth building.
 
-ACCEPTANCE CRITERIA (must meet ALL):
-1. REAL PAIN: Multiple people experience this pain repeatedly
-2. WILLINGNESS TO PAY: Someone would pay $10-100/month to solve this
-3. BUILDABLE: A solo developer could build an MVP in 2-4 weeks
-4. DEFENSIBLE: Has some angle that isn't easily copied by incumbents
-5. CLEAR AUDIENCE: Can identify specific people who have this problem
+AUTOMATIC REJECTION (isValid MUST be false):
+□ Is this a coding/programming question? ("how do I...", "what does X do", syntax help) → REJECT
+□ Is this a framework bug or feature request? (Next.js issue, React problem) → REJECT
+□ Is this asking for help with a one-time task? (migrate data, fix this bug) → REJECT
+□ Is this too vague to build a product? (no specific pain point) → REJECT
+□ Does this market have 5+ well-funded competitors? (invoicing, project management) → REJECT
+□ Would the market be under 5,000 potential customers? → REJECT
+□ Would this require massive scale/network effects to work? → REJECT
+□ Is this actually about a PERSON/COMPANY, not a problem? → REJECT
 
-RESPOND WITH ONLY VALID JSON:
+REQUIRED FOR ACCEPTANCE (ALL must be true):
+□ Is there a SPECIFIC, RECURRING problem? (not one-time)
+□ Would 1,000+ people pay $10+/month for a solution?
+□ Can a solo dev build an MVP in 2-4 weeks?
+□ Is there a clear differentiation angle from competitors?
+□ Did the source content explicitly mention wanting a tool/solution?
+
+RESPONSE FORMAT (JSON only, no other text):
 {
   "isValid": false,
-  "rejectionReason": "Brief reason if rejected",
-  "title": "Product Name (if valid)",
-  "summary": "2-3 sentence business opportunity description",
+  "rejectionReason": "One sentence explaining why this failed",
+  "title": "Only if valid - Product Name",
+  "summary": "Only if valid - 2 sentences max",
   "pain_score": 7,
   "gap_score": 7,
   "category": ["saas"],
-  "keywords": ["keyword1", "keyword2"],
-  "competitor": {"name": "Main Competitor", "rating": 3.5, "weakness": "Specific weakness"},
-  "quote": "Actual quote from the content showing pain",
-  "unique_angle": "What makes this different from existing solutions",
-  "target_audience": "Specific type of person/company who needs this",
-  "monetization_potential": "How this could make money"
+  "keywords": ["word1", "word2"],
+  "competitor": {"name": "Name", "rating": 3.5, "weakness": "Specific weakness"},
+  "quote": "EXACT quote from the source content - do not paraphrase or invent",
+  "unique_angle": "What specific angle makes this different",
+  "target_audience": "Specific person type who needs this",
+  "monetization_potential": "How this makes money"
 }
 
-Be HARSH. Reject 70-80% of inputs. Only accept genuinely good opportunities.`
+CRITICAL: Default to rejection. Only accept if you are CERTAIN this is a real, buildable business opportunity. When in doubt, reject.`
 
         const completion = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0.2, // Lower temperature for more consistent judgments
-          max_tokens: 600,
+          temperature: 0.1, // Very low for consistent, conservative judgments
+          max_tokens: 500,
         })
 
         const text = completion.choices[0]?.message?.content || ''
@@ -549,12 +391,13 @@ Be HARSH. Reject 70-80% of inputs. Only accept genuinely good opportunities.`
         if (jsonMatch) {
           const analysis = JSON.parse(jsonMatch[0])
 
-          if (analysis.isValid) {
-            console.log(`✓ ACCEPTED: ${analysis.title}`)
+          if (analysis.isValid === true) {
+            console.log(`  ✓ ACCEPTED: ${analysis.title}`)
 
-            const trend_score = 5 + Math.floor(Math.random() * 4)
+            // Conservative scoring
+            const trend_score = 5 + Math.floor(Math.random() * 3) // 5-7 range
             const overall_score = Math.round(
-              (analysis.pain_score * 0.4 + trend_score * 0.3 + analysis.gap_score * 0.3) * 10
+              (analysis.pain_score * 0.5 + trend_score * 0.2 + analysis.gap_score * 0.3) * 10
             )
 
             opportunities.push({
@@ -569,7 +412,7 @@ Be HARSH. Reject 70-80% of inputs. Only accept genuinely good opportunities.`
               sources: [{
                 platform: point.source,
                 url: point.url,
-                quote: analysis.quote || point.text.slice(0, 150),
+                quote: analysis.quote || point.text.slice(0, 100),
                 author: point.author
               }],
               competitors: analysis.competitor ? [analysis.competitor] : [],
@@ -580,7 +423,7 @@ Be HARSH. Reject 70-80% of inputs. Only accept genuinely good opportunities.`
             })
           } else {
             rejected++
-            console.log(`✗ REJECTED: ${point.title.slice(0, 40)}... - ${analysis.rejectionReason}`)
+            console.log(`  ✗ REJECTED: ${analysis.rejectionReason || 'No reason given'}`)
           }
         }
 
@@ -592,7 +435,6 @@ Be HARSH. Reject 70-80% of inputs. Only accept genuinely good opportunities.`
         lastError = errorMsg
 
         if (errorMsg.includes('rate') || errorMsg.includes('429') || errorMsg.includes('quota')) {
-          console.error('Groq rate limited')
           quotaExhausted = true
           break
         }
@@ -602,7 +444,6 @@ Be HARSH. Reject 70-80% of inputs. Only accept genuinely good opportunities.`
           await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000))
         } else {
           errors++
-          console.error('Groq error:', errorMsg.slice(0, 100))
         }
       }
     }
@@ -612,14 +453,15 @@ Be HARSH. Reject 70-80% of inputs. Only accept genuinely good opportunities.`
 }
 
 function generateTrendData() {
+  // Placeholder - ideally this would use real Google Trends data
   const data = []
-  let value = 30 + Math.random() * 30
+  let value = 40 + Math.random() * 20
   const now = new Date()
 
   for (let i = 5; i >= 0; i--) {
     const date = new Date(now)
     date.setMonth(date.getMonth() - i)
-    value = Math.min(100, Math.max(10, value + (Math.random() - 0.3) * 15))
+    value = Math.min(100, Math.max(20, value + (Math.random() - 0.4) * 10))
     data.push({
       date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
       value: Math.round(value)
@@ -629,53 +471,50 @@ function generateTrendData() {
   return data
 }
 
-// ============ IMPROVED DUPLICATE DETECTION ============
-function calculateSimilarity(str1: string, str2: string): number {
-  const s1 = str1.toLowerCase().replace(/[^a-z0-9]/g, '')
-  const s2 = str2.toLowerCase().replace(/[^a-z0-9]/g, '')
-
-  if (s1 === s2) return 1
-  if (s1.length < 2 || s2.length < 2) return 0
-
-  // Check if one contains the other
-  if (s1.includes(s2) || s2.includes(s1)) return 0.8
-
-  // Simple word overlap
-  const words1 = new Set(str1.toLowerCase().split(/\s+/).filter(w => w.length > 3))
-  const words2 = new Set(str2.toLowerCase().split(/\s+/).filter(w => w.length > 3))
-
-  const intersection = [...words1].filter(w => words2.has(w)).length
-  const union = new Set([...words1, ...words2]).size
-
-  return union > 0 ? intersection / union : 0
-}
-
+// ============ IMPROVED DUPLICATE DETECTION (0.5 threshold) ============
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function isDuplicate(
-  supabase: any,
-  title: string,
-  sourceUrl: string
-): Promise<boolean> {
+async function isDuplicateInDB(supabase: any, title: string, sourceUrl: string): Promise<boolean> {
   // Check for exact URL match
   const { data: urlMatch } = await supabase
     .from('opportunities')
-    .select('id, title')
+    .select('id')
     .contains('sources', [{ url: sourceUrl }])
     .limit(1)
 
-  if (urlMatch && urlMatch.length > 0) return true
+  if (urlMatch && urlMatch.length > 0) {
+    console.log(`  ✗ Duplicate (exact URL match)`)
+    return true
+  }
 
-  // Check for similar titles
+  // Check for similar titles (lowered threshold to 0.5)
   const { data: recentOpps } = await supabase
     .from('opportunities')
     .select('id, title')
     .order('created_at', { ascending: false })
-    .limit(100)
+    .limit(200)
 
   if (recentOpps && Array.isArray(recentOpps)) {
+    const titleWords = new Set(
+      title.toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .split(/\s+/)
+        .filter(w => w.length > 2)
+    )
+
     for (const opp of recentOpps as Array<{ id: string; title: string }>) {
-      if (calculateSimilarity(title, opp.title) > 0.6) {
-        console.log(`Duplicate detected: "${title}" similar to "${opp.title}"`)
+      const oppWords = new Set(
+        opp.title.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .split(/\s+/)
+          .filter(w => w.length > 2)
+      )
+
+      const intersection = [...titleWords].filter(w => oppWords.has(w)).length
+      const union = new Set([...titleWords, ...oppWords]).size
+      const similarity = union > 0 ? intersection / union : 0
+
+      if (similarity > 0.5) { // Lowered from 0.6 to 0.5
+        console.log(`  ✗ Duplicate: "${title.slice(0, 30)}" ~ "${opp.title.slice(0, 30)}" (${Math.round(similarity * 100)}%)`)
         return true
       }
     }
@@ -703,76 +542,76 @@ export async function GET(request: NextRequest) {
 
   const results = {
     sources: {} as Record<string, number>,
-    preFiltered: 0,
-    totalPainPoints: 0,
+    collected: 0,
+    afterHardReject: 0,
+    afterBatchDedupe: 0,
     analyzed: 0,
-    rejected: 0,
-    duplicates: 0,
+    aiAccepted: 0,
+    aiRejected: 0,
+    dbDuplicates: 0,
     added: 0,
     quotaExhausted: false,
     errors: 0,
     errorDetails: null as string | null,
-    apiKeyStatus: '',
-    qualityScore: 0
+    acceptanceRate: '',
+    apiKeyStatus: ''
   }
 
   try {
-    console.log('Starting QUALITY-FOCUSED pipeline...')
+    console.log('=== STRICT QUALITY PIPELINE ===')
+    console.log('Sources: HackerNews + IndieHackers only (no StackOverflow/GitHub)')
 
-    // Fetch from quality sources
-    const [hnPoints, redditPoints, ghPoints, soPoints, indiePoints] = await Promise.all([
-      fetchHNPainPoints(15),
-      fetchRedditPainPoints(15),
-      fetchGitHubPainPoints(10),
-      fetchStackOverflowPainPoints(5),
-      fetchIndieHackerPainPoints(10)
+    // Fetch from quality sources only
+    const [hnPoints, indiePoints] = await Promise.all([
+      fetchHNPainPoints(20),
+      fetchIndieHackerPainPoints(15)
     ])
 
     results.sources = {
       hackernews: hnPoints.length,
-      reddit: redditPoints.length,
-      github: ghPoints.length,
-      stackoverflow: soPoints.length,
       indiehackers: indiePoints.length
     }
 
-    // Combine and sort by quality
-    let allPainPoints = [...hnPoints, ...redditPoints, ...ghPoints, ...soPoints, ...indiePoints]
+    let allPainPoints = [...hnPoints, ...indiePoints]
+    results.collected = allPainPoints.length
 
-    // Sort by source quality and score
-    allPainPoints.sort((a, b) => {
-      const qualityOrder = { high: 3, medium: 2, low: 1 }
-      const qualityDiff = qualityOrder[b.sourceQuality] - qualityOrder[a.sourceQuality]
-      if (qualityDiff !== 0) return qualityDiff
-      return b.score - a.score
-    })
+    console.log(`\nCollected: ${allPainPoints.length} items`)
 
-    const preFilterCount = allPainPoints.length
-    results.preFiltered = preFilterCount
-    results.totalPainPoints = allPainPoints.length
+    // Remove batch duplicates BEFORE AI analysis
+    allPainPoints = removeBatchDuplicates(allPainPoints)
+    results.afterBatchDedupe = allPainPoints.length
 
-    console.log(`Collected ${allPainPoints.length} pre-filtered pain points`)
+    console.log(`After batch dedupe: ${allPainPoints.length} items`)
 
     if (allPainPoints.length === 0) {
       return NextResponse.json({ message: 'No quality pain points found', ...results })
     }
 
-    results.apiKeyStatus = groqKey ? `${groqKey.slice(0, 8)}...${groqKey.slice(-4)}` : 'MISSING'
+    // Sort by score (highest first)
+    allPainPoints.sort((a, b) => b.score - a.score)
 
-    // Analyze with critical AI
+    results.apiKeyStatus = groqKey ? `${groqKey.slice(0, 6)}...` : 'MISSING'
+
+    // Analyze with ultra-strict AI
     const groqResult = await analyzeWithGroq(allPainPoints, groqKey)
 
     results.analyzed = groqResult.processed
-    results.rejected = groqResult.rejected
+    results.aiAccepted = groqResult.opportunities.length
+    results.aiRejected = groqResult.rejected
     results.quotaExhausted = groqResult.quotaExhausted
     results.errors = groqResult.errors
     results.errorDetails = groqResult.lastError
 
-    console.log(`AI accepted ${groqResult.opportunities.length}/${groqResult.processed} opportunities`)
+    const acceptanceRate = groqResult.processed > 0
+      ? Math.round((groqResult.opportunities.length / groqResult.processed) * 100)
+      : 0
+    results.acceptanceRate = `${acceptanceRate}%`
+
+    console.log(`\nAI Results: ${groqResult.opportunities.length}/${groqResult.processed} accepted (${acceptanceRate}%)`)
 
     if (groqResult.opportunities.length === 0) {
       return NextResponse.json({
-        message: groqResult.quotaExhausted ? 'Rate limited' : 'No opportunities passed quality filter',
+        message: groqResult.quotaExhausted ? 'Rate limited' : 'No opportunities passed strict filter',
         ...results
       })
     }
@@ -783,23 +622,20 @@ export async function GET(request: NextRequest) {
     for (const opp of groqResult.opportunities) {
       const sourceUrl = opp.sources[0]?.url || ''
 
-      if (await isDuplicate(supabase, opp.title, sourceUrl)) {
-        results.duplicates++
+      if (await isDuplicateInDB(supabase, opp.title, sourceUrl)) {
+        results.dbDuplicates++
         continue
       }
 
       const { error } = await supabase.from('opportunities').insert(opp)
       if (!error) {
         results.added++
-        console.log(`✓ Added: ${opp.title}`)
+        console.log(`  ✓ SAVED: ${opp.title}`)
       }
     }
 
-    // Calculate quality score
-    const acceptanceRate = groqResult.opportunities.length / groqResult.processed
-    results.qualityScore = Math.round((1 - acceptanceRate) * 100) // Higher = more selective
-
-    console.log(`Pipeline complete: ${results.added} new opportunities (${results.qualityScore}% selectivity)`)
+    console.log(`\n=== PIPELINE COMPLETE ===`)
+    console.log(`Added: ${results.added} | Duplicates: ${results.dbDuplicates} | AI Acceptance: ${results.acceptanceRate}`)
 
     return NextResponse.json({
       message: 'Pipeline complete',
