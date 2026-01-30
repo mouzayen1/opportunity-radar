@@ -375,10 +375,10 @@ RESPONSE FORMAT (JSON only):
 Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solution (Ask HN), that's evidence of real demand.`
 
         const completion = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
+          model: 'llama-3.1-8b-instant', // Faster model with lower token usage
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3, // Balanced - consistent but allows nuanced judgments
-          max_tokens: 500,
+          max_tokens: 400, // Reduced - our responses are compact JSON
         })
 
         const text = completion.choices[0]?.message?.content || ''
@@ -624,7 +624,11 @@ export async function GET(request: NextRequest) {
       }
 
       const { error } = await supabase.from('opportunities').insert(opp)
-      if (!error) {
+      if (error) {
+        console.error(`  ✗ DB ERROR saving "${opp.title}":`, error.message)
+        results.errors++
+        results.errorDetails = `DB: ${error.message}`
+      } else {
         results.added++
         console.log(`  ✓ SAVED: ${opp.title}`)
       }
