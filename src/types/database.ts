@@ -13,6 +13,14 @@ export type Opportunity = {
   keywords: string[]
   created_at: string
   updated_at: string
+  // Rich details for actionable insights
+  problem?: string
+  solution?: string
+  target_audience?: string
+  market_size?: string
+  monetization?: string
+  mvp_features?: string[]
+  unique_angle?: string
 }
 
 export type Source = {

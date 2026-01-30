@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { ScoreRing } from '@/components/score-ring'
 import { TrendChart } from '@/components/trend-chart'
-import { ArrowLeft, ExternalLink, Target, TrendingUp, Layers, Quote } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Target, TrendingUp, Layers, Quote, Users, DollarSign, Lightbulb, Wrench } from 'lucide-react'
 import { createServerClient } from '@/lib/supabase'
 import { Opportunity } from '@/types/database'
 
@@ -57,6 +57,97 @@ export default async function OpportunityPage({ params }: PageProps) {
             <span className="text-sm text-zinc-500 mt-3">Overall Score</span>
           </div>
         </div>
+
+        {/* Opportunity Details */}
+        {(opportunity.problem || opportunity.solution) && (
+          <div className="grid md:grid-cols-2 gap-6 mb-12">
+            {/* Problem & Solution */}
+            <Card className="border-zinc-800 bg-zinc-900/30 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                  <Lightbulb className="h-5 w-5 text-orange-500" />
+                </div>
+                <h3 className="font-semibold text-white">Problem & Solution</h3>
+              </div>
+              {opportunity.problem && (
+                <div className="mb-4">
+                  <p className="text-sm text-zinc-500 mb-1">Problem</p>
+                  <p className="text-zinc-300">{opportunity.problem}</p>
+                </div>
+              )}
+              {opportunity.solution && (
+                <div>
+                  <p className="text-sm text-zinc-500 mb-1">Solution</p>
+                  <p className="text-zinc-300">{opportunity.solution}</p>
+                </div>
+              )}
+            </Card>
+
+            {/* Market Info */}
+            <Card className="border-zinc-800 bg-zinc-900/30 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                  <Users className="h-5 w-5 text-purple-500" />
+                </div>
+                <h3 className="font-semibold text-white">Market Info</h3>
+              </div>
+              {opportunity.target_audience && (
+                <div className="mb-3">
+                  <p className="text-sm text-zinc-500 mb-1">Target Audience</p>
+                  <p className="text-zinc-300">{opportunity.target_audience}</p>
+                </div>
+              )}
+              {opportunity.market_size && (
+                <div className="mb-3">
+                  <p className="text-sm text-zinc-500 mb-1">Market Size</p>
+                  <p className="text-zinc-300">{opportunity.market_size}</p>
+                </div>
+              )}
+              {opportunity.monetization && (
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-emerald-500" />
+                  <p className="text-emerald-400">{opportunity.monetization}</p>
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {/* MVP Features & Unique Angle */}
+        {(opportunity.mvp_features?.length > 0 || opportunity.unique_angle) && (
+          <div className="grid md:grid-cols-2 gap-6 mb-12">
+            {opportunity.mvp_features?.length > 0 && (
+              <Card className="border-zinc-800 bg-zinc-900/30 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                    <Wrench className="h-5 w-5 text-blue-500" />
+                  </div>
+                  <h3 className="font-semibold text-white">MVP Features</h3>
+                </div>
+                <ul className="space-y-2">
+                  {opportunity.mvp_features.map((feature: string, i: number) => (
+                    <li key={i} className="flex items-start gap-2 text-zinc-300">
+                      <span className="text-blue-500 mt-1">•</span>
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+
+            {opportunity.unique_angle && (
+              <Card className="border-zinc-800 bg-zinc-900/30 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-10 w-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">
+                    <Target className="h-5 w-5 text-yellow-500" />
+                  </div>
+                  <h3 className="font-semibold text-white">Unique Angle</h3>
+                </div>
+                <p className="text-zinc-300">{opportunity.unique_angle}</p>
+              </Card>
+            )}
+          </div>
+        )}
 
         {/* 3 Signals */}
         <div className="grid md:grid-cols-3 gap-6 mb-12">
