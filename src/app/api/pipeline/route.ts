@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import Groq from 'groq-sdk'
 
 // API endpoints
 const HN_API = 'https://hacker-news.firebaseio.com/v0'
@@ -280,13 +280,12 @@ async function fetchProductHuntPainPoints(limit: number = 10): Promise<PainPoint
 }
 
 // ============ GEMINI ANALYSIS ============
-async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
+async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string) {
   // Log API key info (masked) for debugging
   const keyPreview = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)} (${apiKey.length} chars)` : 'NO KEY'
-  console.log('Gemini API Key:', keyPreview)
+  console.log('Groq API Key:', keyPreview)
 
-  const genAI = new GoogleGenerativeAI(apiKey)
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' })
+  const groq = new Groq({ apiKey })
 
   const opportunities = []
   let processed = 0
@@ -294,8 +293,8 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
   let quotaExhausted = false
   let lastError: string | null = null
 
-  // Process 3 items per run - free tier is ~20 req/day
-  const maxItems = 3
+  // Process 10 items per run - Groq has 14,400 req/day free tier!
+  const maxItems = 10
 
   for (const point of painPoints.slice(0, maxItems)) {
     if (quotaExhausted) break
@@ -309,17 +308,27 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
 
     while (retries <= maxRetries) {
       try {
-        // Minimal prompt to save tokens
-        const prompt = `Convert to startup opportunity JSON:
-"${point.title}" - ${point.text.slice(0, 250)}
+        const prompt = `Convert this user complaint/discussion into a startup opportunity. Analyze and respond with ONLY valid JSON:
 
-Reply ONLY with: {"isValid":true/false,"title":"...","summary":"...","pain_score":1-10,"gap_score":1-10,"category":["saas"|"developer-tools"|"productivity"|"finance"|"health"|"consumer"|"b2b"|"ai-ml"],"keywords":["k1","k2"],"competitor":{"name":"...","rating":1-5,"weakness":"..."},"quote":"..."}`
+Title: "${point.title}"
+Content: ${point.text.slice(0, 400)}
 
-        const result = await model.generateContent(prompt)
-        const text = result.response.text()
-        console.log('Gemini response:', text.slice(0, 200))
+Respond with this exact JSON structure (no other text):
+{"isValid":true,"title":"Short Opportunity Title","summary":"2-3 sentence description of the business opportunity","pain_score":7,"gap_score":7,"category":["saas"],"keywords":["keyword1","keyword2"],"competitor":{"name":"Main Competitor","rating":3.5,"weakness":"Their main weakness"},"quote":"Key quote from the content"}
 
-        const jsonMatch = text.match(/\{[\s\S]*?\}/)
+Set isValid to false only if this is spam or completely irrelevant. Categories: saas, developer-tools, productivity, finance, health, consumer, b2b, ai-ml, other`
+
+        const completion = await groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          max_tokens: 500,
+        })
+
+        const text = completion.choices[0]?.message?.content || ''
+        console.log('Groq response:', text.slice(0, 200))
+
+        const jsonMatch = text.match(/\{[\s\S]*\}/)
 
         if (jsonMatch) {
           console.log('JSON match found:', jsonMatch[0].slice(0, 100))
@@ -353,19 +362,19 @@ Reply ONLY with: {"isValid":true/false,"title":"...","summary":"...","pain_score
           }
         }
 
-        // Success - wait 8s between requests (free tier = 10 req/min)
-        await new Promise(r => setTimeout(r, 8000))
+        // Small delay between requests (Groq is fast, 30 req/min limit)
+        await new Promise(r => setTimeout(r, 2500))
         break // Exit retry loop on success
 
       } catch (e: unknown) {
         const errorMsg = e instanceof Error ? e.message : String(e)
         const fullError = e instanceof Error ? JSON.stringify({ name: e.name, message: e.message, stack: e.stack?.slice(0, 500) }) : String(e)
-        console.error('Gemini error details:', fullError)
+        console.error('Groq error details:', fullError)
         lastError = errorMsg
 
-        // Check if quota exhausted (daily limit)
-        if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
-          console.error('Gemini quota exhausted - stopping analysis. Full error:', fullError)
+        // Check if rate limited
+        if (errorMsg.includes('rate') || errorMsg.includes('429') || errorMsg.includes('quota')) {
+          console.error('Groq rate limited - stopping analysis. Full error:', fullError)
           quotaExhausted = true
           break
         }
@@ -373,12 +382,12 @@ Reply ONLY with: {"isValid":true/false,"title":"...","summary":"...","pain_score
         // Retry with backoff for other errors
         retries++
         if (retries <= maxRetries) {
-          const backoffMs = Math.pow(2, retries) * 1000 // 2s, 4s, 8s
+          const backoffMs = Math.pow(2, retries) * 1000
           console.log(`Retry ${retries}/${maxRetries} after ${backoffMs}ms for:`, point.title.slice(0, 30))
           await new Promise(r => setTimeout(r, backoffMs))
         } else {
           errors++
-          console.error('Gemini error (max retries) for', point.title.slice(0, 30), ':', errorMsg)
+          console.error('Groq error (max retries) for', point.title.slice(0, 30), ':', errorMsg)
         }
       }
     }
@@ -416,10 +425,10 @@ export async function GET(request: NextRequest) {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const geminiKey = process.env.GEMINI_API_KEY
+  const groqKey = process.env.GROQ_API_KEY
 
-  if (!supabaseUrl || !supabaseKey || !geminiKey) {
-    return NextResponse.json({ error: 'Missing env vars' }, { status: 500 })
+  if (!supabaseUrl || !supabaseKey || !groqKey) {
+    return NextResponse.json({ error: 'Missing env vars (need GROQ_API_KEY)' }, { status: 500 })
   }
 
   const results = {
@@ -467,25 +476,25 @@ export async function GET(request: NextRequest) {
     const shuffled = allPainPoints.sort(() => Math.random() - 0.5)
 
     // Log API key status
-    results.apiKeyStatus = geminiKey ? `${geminiKey.slice(0, 8)}...${geminiKey.slice(-4)}` : 'MISSING'
+    results.apiKeyStatus = groqKey ? `${groqKey.slice(0, 8)}...${groqKey.slice(-4)}` : 'MISSING'
 
-    // Analyze with Gemini
-    const geminiResult = await analyzeWithGemini(shuffled, geminiKey)
-    const opportunities = geminiResult.opportunities
+    // Analyze with Groq (Llama 3.3 70B)
+    const groqResult = await analyzeWithGroq(shuffled, groqKey)
+    const opportunities = groqResult.opportunities
     results.analyzed = opportunities.length
-    results.quotaExhausted = geminiResult.quotaExhausted
-    results.errors = geminiResult.errors
-    results.errorDetails = geminiResult.lastError
+    results.quotaExhausted = groqResult.quotaExhausted
+    results.errors = groqResult.errors
+    results.errorDetails = groqResult.lastError
 
     console.log(`Analyzed ${opportunities.length} valid opportunities`)
 
-    if (geminiResult.quotaExhausted) {
-      console.log('Gemini quota exhausted - pipeline stopping early')
+    if (groqResult.quotaExhausted) {
+      console.log('Groq quota exhausted - pipeline stopping early')
     }
 
     if (opportunities.length === 0) {
-      const message = geminiResult.quotaExhausted
-        ? 'Gemini API quota exhausted - try again tomorrow'
+      const message = groqResult.quotaExhausted
+        ? 'Groq API quota exhausted - try again later'
         : 'No valid opportunities'
       return NextResponse.json({ message, ...results })
     }
