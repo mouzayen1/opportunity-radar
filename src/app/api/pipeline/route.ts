@@ -294,8 +294,8 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
   let quotaExhausted = false
   let lastError: string | null = null
 
-  // Process fewer items to stay within free tier limits (1500/day)
-  const maxItems = 10
+  // Process 5 items per run - enough variety, minimal cost
+  const maxItems = 5
 
   for (const point of painPoints.slice(0, maxItems)) {
     if (quotaExhausted) break
@@ -305,20 +305,15 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
 
     // Retry logic with exponential backoff
     let retries = 0
-    const maxRetries = 3
+    const maxRetries = 2
 
     while (retries <= maxRetries) {
       try {
-        const prompt = `You are a startup idea analyst. Convert this complaint/discussion into a business opportunity.
+        // Minimal prompt to save tokens
+        const prompt = `Convert to startup opportunity JSON:
+"${point.title}" - ${point.text.slice(0, 250)}
 
-Source: ${point.source}
-Title: ${point.title}
-Content: ${point.text.slice(0, 400)}
-
-Respond with ONLY this JSON (no other text):
-{"isValid":true,"title":"Short Opportunity Title","summary":"Brief description of the opportunity","pain_score":7,"gap_score":7,"category":["saas"],"keywords":["keyword1","keyword2"],"competitor":{"name":"Competitor","rating":3.5,"weakness":"Weakness"},"quote":"Key quote"}
-
-Set isValid to true unless this is completely irrelevant (spam, off-topic). Categories: saas, developer-tools, productivity, finance, health, consumer, b2b, ai-ml, other`
+Reply ONLY with: {"isValid":true/false,"title":"...","summary":"...","pain_score":1-10,"gap_score":1-10,"category":["saas"|"developer-tools"|"productivity"|"finance"|"health"|"consumer"|"b2b"|"ai-ml"],"keywords":["k1","k2"],"competitor":{"name":"...","rating":1-5,"weakness":"..."},"quote":"..."}`
 
         const result = await model.generateContent(prompt)
         const text = result.response.text()
