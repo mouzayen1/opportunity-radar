@@ -649,8 +649,9 @@ function calculateSimilarity(str1: string, str2: string): number {
   return union > 0 ? intersection / union : 0
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function isDuplicate(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   title: string,
   sourceUrl: string
 ): Promise<boolean> {
@@ -670,8 +671,8 @@ async function isDuplicate(
     .order('created_at', { ascending: false })
     .limit(100)
 
-  if (recentOpps) {
-    for (const opp of recentOpps) {
+  if (recentOpps && Array.isArray(recentOpps)) {
+    for (const opp of recentOpps as Array<{ id: string; title: string }>) {
       if (calculateSimilarity(title, opp.title) > 0.6) {
         console.log(`Duplicate detected: "${title}" similar to "${opp.title}"`)
         return true
