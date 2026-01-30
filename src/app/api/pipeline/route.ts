@@ -331,57 +331,53 @@ async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string) {
 
     while (retries <= maxRetries) {
       try {
-        // ULTRA-STRICT PROMPT
-        const prompt = `You are an EXTREMELY SKEPTICAL startup analyst. Your DEFAULT answer is NO - this is NOT an opportunity.
+        // BALANCED QUALITY PROMPT - Strict but fair
+        const prompt = `You are a startup analyst evaluating whether this content represents a REAL business opportunity.
 
 ANALYZE THIS CONTENT:
-Source: ${point.source}
+Source: ${point.source} (${point.score} upvotes)
 Title: "${point.title}"
-Content: ${point.text.slice(0, 500)}
-Upvotes: ${point.score}
+Content: ${point.text.slice(0, 600)}
 
-YOUR JOB: Decide if this is a REAL business opportunity worth building.
+AUTOMATIC REJECTION - Return isValid: false if ANY of these apply:
+1. CODING QUESTION: Asking "how do I...", syntax help, debugging, tutorials
+2. FRAMEWORK BUG: Bug reports or feature requests for Next.js, React, etc.
+3. ONE-TIME TASK: Help with migration, deployment, or specific project
+4. NEWS/OPINION: Just sharing news, discussing trends, or commentary
+5. TOO CROWDED: Direct competition with giants (Slack, Notion, QuickBooks core features)
 
-AUTOMATIC REJECTION (isValid MUST be false):
-□ Is this a coding/programming question? ("how do I...", "what does X do", syntax help) → REJECT
-□ Is this a framework bug or feature request? (Next.js issue, React problem) → REJECT
-□ Is this asking for help with a one-time task? (migrate data, fix this bug) → REJECT
-□ Is this too vague to build a product? (no specific pain point) → REJECT
-□ Does this market have 5+ well-funded competitors? (invoicing, project management) → REJECT
-□ Would the market be under 5,000 potential customers? → REJECT
-□ Would this require massive scale/network effects to work? → REJECT
-□ Is this actually about a PERSON/COMPANY, not a problem? → REJECT
+ACCEPT if this represents a buildable opportunity:
+- Shows a RECURRING pain point (not one-time)
+- Has an underserved niche (specific audience, not "everyone")
+- Could be profitable as a focused tool ($5-100/mo range)
+- An indie dev could realistically build an MVP
 
-REQUIRED FOR ACCEPTANCE (ALL must be true):
-□ Is there a SPECIFIC, RECURRING problem? (not one-time)
-□ Would 1,000+ people pay $10+/month for a solution?
-□ Can a solo dev build an MVP in 2-4 weeks?
-□ Is there a clear differentiation angle from competitors?
-□ Did the source content explicitly mention wanting a tool/solution?
+Show HN posts that demonstrate working products = likely VALID (proves demand)
+Ask HN posts seeking tools/solutions = likely VALID (proves need)
 
-RESPONSE FORMAT (JSON only, no other text):
+RESPONSE FORMAT (JSON only):
 {
-  "isValid": false,
-  "rejectionReason": "One sentence explaining why this failed",
-  "title": "Only if valid - Product Name",
-  "summary": "Only if valid - 2 sentences max",
-  "pain_score": 7,
-  "gap_score": 7,
-  "category": ["saas"],
-  "keywords": ["word1", "word2"],
-  "competitor": {"name": "Name", "rating": 3.5, "weakness": "Specific weakness"},
-  "quote": "EXACT quote from the source content - do not paraphrase or invent",
-  "unique_angle": "What specific angle makes this different",
-  "target_audience": "Specific person type who needs this",
-  "monetization_potential": "How this makes money"
+  "isValid": true/false,
+  "rejectionReason": "Only if invalid - brief reason",
+  "title": "Product Name (max 5 words)",
+  "summary": "What problem it solves and for whom (2 sentences)",
+  "pain_score": 1-10,
+  "gap_score": 1-10,
+  "category": ["saas", "devtool", "productivity", "other"],
+  "keywords": ["3-5 relevant keywords"],
+  "competitor": {"name": "Main competitor", "rating": 1-5, "weakness": "Their gap"},
+  "quote": "Key quote from the source showing the pain",
+  "unique_angle": "What makes this different",
+  "target_audience": "Specific user type",
+  "monetization_potential": "Pricing model"
 }
 
-CRITICAL: Default to rejection. Only accept if you are CERTAIN this is a real, buildable business opportunity. When in doubt, reject.`
+Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solution (Ask HN), that's evidence of real demand.`
 
         const completion = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1, // Very low for consistent, conservative judgments
+          temperature: 0.3, // Balanced - consistent but allows nuanced judgments
           max_tokens: 500,
         })
 
