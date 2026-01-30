@@ -353,8 +353,8 @@ Reply ONLY with: {"isValid":true/false,"title":"...","summary":"...","pain_score
           }
         }
 
-        // Success - wait before next request to respect rate limits
-        await new Promise(r => setTimeout(r, 2000))
+        // Success - wait 8s between requests (free tier = 10 req/min)
+        await new Promise(r => setTimeout(r, 8000))
         break // Exit retry loop on success
 
       } catch (e: unknown) {
