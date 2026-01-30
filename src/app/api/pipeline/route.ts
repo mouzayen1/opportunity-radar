@@ -286,7 +286,7 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
   console.log('Gemini API Key:', keyPreview)
 
   const genAI = new GoogleGenerativeAI(apiKey)
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' })
 
   const opportunities = []
   let processed = 0
@@ -294,8 +294,8 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
   let quotaExhausted = false
   let lastError: string | null = null
 
-  // Process 5 items per run - enough variety, minimal cost
-  const maxItems = 5
+  // Process 3 items per run - free tier is ~20 req/day
+  const maxItems = 3
 
   for (const point of painPoints.slice(0, maxItems)) {
     if (quotaExhausted) break
