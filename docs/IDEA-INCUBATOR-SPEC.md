@@ -642,8 +642,15 @@ Radar → Validator → [HUMAN] → Builder → [HUMAN] → Distributor → [HUM
 
 - [x] OpportunityRadar built and deployed
 - [x] Multi-source data pipeline (5 sources)
-- [x] Gemini AI analysis integration
-- [ ] Gemini quota reset (waiting)
+- [x] Switched to Groq (Llama 3.3 70B) - 14,400 req/day free tier
+- [x] **QUALITY OVERHAUL** (Jan 30, 2026)
+  - Pre-filtering: Coding question detection via regex
+  - Business pain keyword requirements
+  - AI: Critical prompt with 7 rejection criteria
+  - 82-88% rejection rate (only ~15% of inputs accepted)
+  - Sources: Removed framework repos, added indie hacker search
+  - Duplicate detection: URL + title similarity (60% threshold)
+- [ ] Reddit source (blocked from serverless - needs workaround)
 - [ ] Validator Agent implementation
 - [ ] Builder Agent workflow
 - [ ] Distributor Agent implementation
