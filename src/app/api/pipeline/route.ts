@@ -281,6 +281,10 @@ async function fetchProductHuntPainPoints(limit: number = 10): Promise<PainPoint
 
 // ============ GEMINI ANALYSIS ============
 async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
+  // Log API key info (masked) for debugging
+  const keyPreview = apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)} (${apiKey.length} chars)` : 'NO KEY'
+  console.log('Gemini API Key:', keyPreview)
+
   const genAI = new GoogleGenerativeAI(apiKey)
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
@@ -288,6 +292,7 @@ async function analyzeWithGemini(painPoints: PainPoint[], apiKey: string) {
   let processed = 0
   let errors = 0
   let quotaExhausted = false
+  let lastError: string | null = null
 
   // Process fewer items to stay within free tier limits (1500/day)
   const maxItems = 10
@@ -359,10 +364,13 @@ Set isValid to true unless this is completely irrelevant (spam, off-topic). Cate
 
       } catch (e: unknown) {
         const errorMsg = e instanceof Error ? e.message : String(e)
+        const fullError = e instanceof Error ? JSON.stringify({ name: e.name, message: e.message, stack: e.stack?.slice(0, 500) }) : String(e)
+        console.error('Gemini error details:', fullError)
+        lastError = errorMsg
 
         // Check if quota exhausted (daily limit)
         if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
-          console.error('Gemini quota exhausted - stopping analysis')
+          console.error('Gemini quota exhausted - stopping analysis. Full error:', fullError)
           quotaExhausted = true
           break
         }
@@ -381,7 +389,7 @@ Set isValid to true unless this is completely irrelevant (spam, off-topic). Cate
     }
   }
 
-  return { opportunities, quotaExhausted, processed, errors }
+  return { opportunities, quotaExhausted, processed, errors, lastError }
 }
 
 function generateTrendData() {
@@ -425,7 +433,9 @@ export async function GET(request: NextRequest) {
     analyzed: 0,
     added: 0,
     quotaExhausted: false,
-    errors: 0
+    errors: 0,
+    errorDetails: null as string | null,
+    apiKeyStatus: ''
   }
 
   try {
@@ -461,12 +471,16 @@ export async function GET(request: NextRequest) {
     // Shuffle to get variety
     const shuffled = allPainPoints.sort(() => Math.random() - 0.5)
 
+    // Log API key status
+    results.apiKeyStatus = geminiKey ? `${geminiKey.slice(0, 8)}...${geminiKey.slice(-4)}` : 'MISSING'
+
     // Analyze with Gemini
     const geminiResult = await analyzeWithGemini(shuffled, geminiKey)
     const opportunities = geminiResult.opportunities
     results.analyzed = opportunities.length
     results.quotaExhausted = geminiResult.quotaExhausted
     results.errors = geminiResult.errors
+    results.errorDetails = geminiResult.lastError
 
     console.log(`Analyzed ${opportunities.length} valid opportunities`)
 
