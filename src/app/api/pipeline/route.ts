@@ -102,9 +102,14 @@ interface Opportunity {
   sources: Array<{ platform: string; url: string; quote: string; author: string }>
   competitors: Array<{ name: string; rating: number; weakness: string }>
   trend_data: Array<{ date: string; value: number }>
-  unique_angle?: string
-  target_audience?: string
-  monetization_potential?: string
+  // Rich details for actionable insights
+  problem?: string           // Clear problem statement (1-2 sentences)
+  solution?: string          // What the product does (1-2 sentences)
+  target_audience?: string   // Specific user persona
+  market_size?: string       // Rough estimate (e.g., "50K-100K developers")
+  monetization?: string      // Pricing model (e.g., "$15/mo SaaS")
+  mvp_features?: string[]    // 3-4 key features to build first
+  unique_angle?: string      // What makes this different
 }
 
 // ============ STRICT PRE-FILTER ============
@@ -331,48 +336,49 @@ async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string) {
 
     while (retries <= maxRetries) {
       try {
-        // BALANCED QUALITY PROMPT - Strict but fair
-        const prompt = `You are a startup analyst evaluating whether this content represents a REAL business opportunity.
+        // RICH ANALYSIS PROMPT - Generate actionable opportunity details
+        const prompt = `You are a startup analyst. Evaluate if this is a REAL business opportunity and provide actionable details.
 
-ANALYZE THIS CONTENT:
+CONTENT TO ANALYZE:
 Source: ${point.source} (${point.score} upvotes)
 Title: "${point.title}"
 Content: ${point.text.slice(0, 600)}
 
-AUTOMATIC REJECTION - Return isValid: false if ANY of these apply:
-1. CODING QUESTION: Asking "how do I...", syntax help, debugging, tutorials
-2. FRAMEWORK BUG: Bug reports or feature requests for Next.js, React, etc.
-3. ONE-TIME TASK: Help with migration, deployment, or specific project
-4. NEWS/OPINION: Just sharing news, discussing trends, or commentary
-5. TOO CROWDED: Direct competition with giants (Slack, Notion, QuickBooks core features)
+REJECT (isValid: false) if:
+- Coding question ("how do I...", syntax, debugging)
+- Framework bug report (Next.js, React issues)
+- One-time task (migration, deployment help)
+- News/opinion piece
+- Direct competition with giants (Slack, Notion core features)
 
-ACCEPT if this represents a buildable opportunity:
-- Shows a RECURRING pain point (not one-time)
-- Has an underserved niche (specific audience, not "everyone")
-- Could be profitable as a focused tool ($5-100/mo range)
-- An indie dev could realistically build an MVP
-
-Show HN posts that demonstrate working products = likely VALID (proves demand)
-Ask HN posts seeking tools/solutions = likely VALID (proves need)
+ACCEPT if there's a recurring pain point an indie dev could solve profitably.
 
 RESPONSE FORMAT (JSON only):
 {
   "isValid": true/false,
-  "rejectionReason": "Only if invalid - brief reason",
-  "title": "Product Name (max 5 words)",
-  "summary": "What problem it solves and for whom (2 sentences)",
+  "rejectionReason": "Brief reason if rejected",
+
+  "title": "Product Name (3-5 words)",
+  "problem": "What specific problem exists? Who has it? (2 sentences max)",
+  "solution": "What would this product do? (2 sentences max)",
+
+  "target_audience": "Specific persona (e.g., 'Solo developers shipping side projects')",
+  "market_size": "Rough estimate (e.g., '50K-200K potential users')",
+  "monetization": "Pricing model (e.g., 'Freemium, $12/mo Pro tier')",
+
+  "mvp_features": ["Feature 1", "Feature 2", "Feature 3"],
+  "unique_angle": "What differentiates this from alternatives? (1 sentence)",
+
+  "competitor": {"name": "Main competitor", "weakness": "Their specific gap"},
+  "evidence": "Key quote or signal from the source proving demand",
+
   "pain_score": 1-10,
   "gap_score": 1-10,
-  "category": ["saas", "devtool", "productivity", "other"],
-  "keywords": ["3-5 relevant keywords"],
-  "competitor": {"name": "Main competitor", "rating": 1-5, "weakness": "Their gap"},
-  "quote": "Key quote from the source showing the pain",
-  "unique_angle": "What makes this different",
-  "target_audience": "Specific user type",
-  "monetization_potential": "Pricing model"
+  "category": ["saas", "devtool", "productivity", "consumer"],
+  "keywords": ["keyword1", "keyword2", "keyword3"]
 }
 
-Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solution (Ask HN), that's evidence of real demand.`
+Keep all text CONCISE - this should fit on a single card view.`
 
         const completion = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile', // Quality model for accurate judgments
@@ -396,10 +402,10 @@ Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solu
               (analysis.pain_score * 0.5 + trend_score * 0.2 + analysis.gap_score * 0.3) * 10
             )
 
-            // Only include fields that exist in the database schema
+            // Build rich opportunity with actionable details
             opportunities.push({
               title: analysis.title,
-              summary: analysis.summary,
+              summary: analysis.problem || analysis.summary || '', // Use problem as summary
               pain_score: analysis.pain_score,
               trend_score,
               gap_score: analysis.gap_score,
@@ -409,13 +415,19 @@ Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solu
               sources: [{
                 platform: point.source,
                 url: point.url,
-                quote: analysis.quote || point.text.slice(0, 100),
+                quote: analysis.evidence || point.text.slice(0, 150),
                 author: point.author
               }],
               competitors: analysis.competitor ? [analysis.competitor] : [],
-              trend_data: generateTrendData()
-              // Note: unique_angle, target_audience, monetization_potential
-              // are captured in the AI analysis but not stored in DB (schema doesn't have these columns)
+              trend_data: generateTrendData(),
+              // Rich details for actionable insights
+              problem: analysis.problem,
+              solution: analysis.solution,
+              target_audience: analysis.target_audience,
+              market_size: analysis.market_size,
+              monetization: analysis.monetization,
+              mvp_features: analysis.mvp_features,
+              unique_angle: analysis.unique_angle
             })
           } else {
             rejected++
