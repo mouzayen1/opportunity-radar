@@ -223,10 +223,10 @@ async function fetchRedditPainPoints(limit: number = 20): Promise<PainPoint[]> {
       if (painPoints.length >= limit) break
 
       const res = await fetch(
-        `${REDDIT_API}/r/${subreddit}/hot.json?limit=25`,
+        `${REDDIT_API}/r/${subreddit}/hot.json?limit=25&raw_json=1`,
         {
           headers: {
-            'User-Agent': 'OpportunityRadar/1.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
           }
         }
       )
@@ -300,8 +300,9 @@ async function fetchGitHubPainPoints(limit: number = 15): Promise<PainPoint[]> {
         continue
       }
 
+      // Fetch issues without requiring specific labels (many repos don't use them)
       const res = await fetch(
-        `https://api.github.com/repos/${repo}/issues?state=open&sort=comments&per_page=15&labels=enhancement,feature-request,feature`,
+        `https://api.github.com/repos/${repo}/issues?state=open&sort=comments&per_page=15`,
         {
           headers: {
             'Accept': 'application/vnd.github.v3+json',
