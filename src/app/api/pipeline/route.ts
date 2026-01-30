@@ -318,7 +318,7 @@ async function analyzeWithGroq(painPoints: PainPoint[], apiKey: string) {
   let quotaExhausted = false
   let lastError: string | null = null
 
-  const maxItems = 40
+  const maxItems = 30 // Stay within Groq daily limits
 
   for (const point of painPoints.slice(0, maxItems)) {
     if (quotaExhausted) break
@@ -375,10 +375,10 @@ RESPONSE FORMAT (JSON only):
 Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solution (Ask HN), that's evidence of real demand.`
 
         const completion = await groq.chat.completions.create({
-          model: 'llama-3.1-8b-instant', // Faster model with lower token usage
+          model: 'llama-3.3-70b-versatile', // Quality model for accurate judgments
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3, // Balanced - consistent but allows nuanced judgments
-          max_tokens: 400, // Reduced - our responses are compact JSON
+          max_tokens: 400,
         })
 
         const text = completion.choices[0]?.message?.content || ''
@@ -396,6 +396,7 @@ Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solu
               (analysis.pain_score * 0.5 + trend_score * 0.2 + analysis.gap_score * 0.3) * 10
             )
 
+            // Only include fields that exist in the database schema
             opportunities.push({
               title: analysis.title,
               summary: analysis.summary,
@@ -412,10 +413,9 @@ Be FAIR: If someone built a working product (Show HN) or explicitly seeks a solu
                 author: point.author
               }],
               competitors: analysis.competitor ? [analysis.competitor] : [],
-              trend_data: generateTrendData(),
-              unique_angle: analysis.unique_angle,
-              target_audience: analysis.target_audience,
-              monetization_potential: analysis.monetization_potential
+              trend_data: generateTrendData()
+              // Note: unique_angle, target_audience, monetization_potential
+              // are captured in the AI analysis but not stored in DB (schema doesn't have these columns)
             })
           } else {
             rejected++
