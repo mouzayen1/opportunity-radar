@@ -114,9 +114,9 @@ export default async function OpportunityPage({ params }: PageProps) {
         )}
 
         {/* MVP Features & Unique Angle */}
-        {(opportunity.mvp_features?.length > 0 || opportunity.unique_angle) && (
+        {((opportunity.mvp_features && opportunity.mvp_features.length > 0) || opportunity.unique_angle) && (
           <div className="grid md:grid-cols-2 gap-6 mb-12">
-            {opportunity.mvp_features?.length > 0 && (
+            {opportunity.mvp_features && opportunity.mvp_features.length > 0 && (
               <Card className="border-zinc-800 bg-zinc-900/30 p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
