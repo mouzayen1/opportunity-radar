@@ -122,7 +122,8 @@ Response (JSON only):
 /**
  * Check for duplicates in database
  */
-async function isDuplicate(supabase: ReturnType<typeof createClient>, title: string, url: string): Promise<boolean> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function isDuplicate(supabase: any, title: string, url: string): Promise<boolean> {
   // Check URL
   const { data: urlMatch } = await supabase
     .from('opportunities')
@@ -139,9 +140,9 @@ async function isDuplicate(supabase: ReturnType<typeof createClient>, title: str
     .order('created_at', { ascending: false })
     .limit(100)
 
-  if (recent) {
+  if (recent && Array.isArray(recent)) {
     const titleWords = new Set(title.toLowerCase().split(/\s+/).filter(w => w.length > 3))
-    for (const r of recent) {
+    for (const r of recent as Array<{ title: string }>) {
       const rWords = new Set(r.title.toLowerCase().split(/\s+/).filter(w => w.length > 3))
       const overlap = [...titleWords].filter(w => rWords.has(w)).length
       if (overlap / Math.max(titleWords.size, rWords.size) > 0.5) return true
