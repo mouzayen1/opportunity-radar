@@ -1,130 +1,192 @@
 /**
- * Pipeline v3 - Focused Opportunity Discovery
+ * Opportunity Pipeline v2.1
  *
- * Key changes:
- * - Only searches for explicit tool-seeking posts
- * - Aggressive pre-filtering before AI
- * - Simple YES/NO AI validation
+ * Uses pi-mono for multi-provider AI with key rotation.
+ * Spreads load across Groq, Gemini, etc.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import Groq from 'groq-sdk'
-import { collectOpportunities, RawOpportunity } from '@/lib/opportunity-collector'
+import { getModel, complete, Context, getEnvApiKey } from '@mariozechner/pi-ai'
+import { collectPainPoints, PainPoint } from '@/lib/pain-collector'
+import { SCORING_GUIDE, calculateTotalScore, isQualifiedOpportunity, MIN_SCORE } from '@/lib/opportunity-criteria'
 
-interface ValidatedOpportunity {
+interface ScoredOpportunity {
   title: string
   problem: string
+  existingSolutions: string[]
+  solutionProblems: string[]
+  targetAudience: string
+  painClarity: number
+  solutionGap: number
+  willingnessToPay: number
+  buildability: number
+  validation: number
+  totalScore: number
   evidence: string
-  target_audience: string
-  pain_score: number
-  gap_score: number
-  category: string[]
-  source: RawOpportunity
+  reasoning: string
+  source: PainPoint
+}
+
+// Provider rotation config - uses free tiers
+const PROVIDERS = [
+  { provider: 'groq', model: 'llama-3.3-70b-versatile', envKey: 'groq' },
+  { provider: 'google', model: 'gemini-2.0-flash', envKey: 'google' },
+] as const
+
+type ProviderConfig = typeof PROVIDERS[number]
+
+function getAvailableProviders(): ProviderConfig[] {
+  return PROVIDERS.filter(p => {
+    const key = getEnvApiKey(p.envKey)
+    return key !== undefined
+  })
 }
 
 /**
- * Simple, focused AI validation
+ * AI Scoring with provider rotation
  */
-async function validateWithAI(
-  opportunities: RawOpportunity[],
-  groq: Groq
-): Promise<{ validated: ValidatedOpportunity[]; rejected: number; errors: number }> {
-  const validated: ValidatedOpportunity[] = []
+async function scoreWithAI(
+  painPoints: PainPoint[],
+  providers: ProviderConfig[]
+): Promise<{ scored: ScoredOpportunity[]; rejected: number; errors: number; apiCalls: number }> {
+  const scored: ScoredOpportunity[] = []
   let rejected = 0
   let errors = 0
+  let apiCalls = 0
+  let consecutiveErrors = 0
+  let providerIndex = 0
 
-  for (const opp of opportunities) {
+  console.log(`\n[PI-MONO] Available providers: ${providers.map(p => p.provider).join(', ')}`)
+
+  for (const point of painPoints) {
+    if (consecutiveErrors >= 3) {
+      console.log(`\n🛑 STOPPING: ${consecutiveErrors} consecutive errors`)
+      break
+    }
+
+    // Rotate through providers
+    const currentProvider = providers[providerIndex % providers.length]
+    providerIndex++
+
     try {
-      console.log(`\nValidating: "${opp.title.slice(0, 50)}..."`)
+      apiCalls++
+      console.log(`\n[${apiCalls}/${painPoints.length}] [${currentProvider.provider}] "${point.title.slice(0, 45)}..."`)
 
-      const prompt = `Analyze this post. Is someone SEEKING a software solution that doesn't exist yet?
+      const prompt = `You are a strict business opportunity evaluator. Follow the instructions EXACTLY.
 
-TITLE: ${opp.title}
-CONTENT: ${opp.text.slice(0, 600)}
-SOURCE: ${opp.source} (${opp.score} upvotes)
+## POST TO EVALUATE
+Title: ${point.title}
+Content: ${point.text.slice(0, 800)}
+Engagement: ${point.score} upvotes, ${point.commentCount || 0} comments
 
-REJECT if:
-- This is announcing an EXISTING product ("I built", "launched", "check out")
-- This is advice/tips (not seeking a solution)
-- This is a coding question (how to implement X)
-- A well-known solution already exists (name it if so)
-- The problem is too vague to build a product for
+${SCORING_GUIDE}
 
-ACCEPT if:
-- Someone explicitly needs a tool/app/software that doesn't exist
-- There's a specific, quantified pain point
-- A solo developer could realistically build this
+## REQUIRED RESPONSE FORMAT (JSON only, no other text)
 
-Response (JSON only):
+You MUST follow the evaluation steps above, then output this JSON:
+
 {
-  "accept": true/false,
-  "reason": "One sentence explanation",
-  "existingSolution": "Name of existing tool if any, or null",
+  "hardRejectReason": "null if passed, or explain which hard rejection condition was triggered",
+  "existingSolutions": ["List ALL solutions you know of that solve this problem - be thorough"],
+  "solutionProblems": ["Why existing solutions fail for THIS specific use case"] or [],
+  "title": "Product name (2-4 words) or 'N/A' if rejecting",
+  "problem": "Core problem (1 sentence)",
+  "targetAudience": "Who has this problem",
+  "painClarity": <1-10>,
+  "solutionGap": <1-10>,
+  "willingnessToPay": <1-10>,
+  "buildability": <1-10>,
+  "validation": <1-10>,
+  "evidence": "Direct quote from post showing pain",
+  "reasoning": "Explain your scores in 2-3 sentences. If rejecting, explain why."
+}
 
-  // Only if accept=true:
-  "title": "Product name (2-3 words)",
-  "problem": "What they need (1 sentence)",
-  "evidence": "Direct quote showing the pain",
-  "target_audience": "Who has this problem",
-  "pain_score": 1-10,
-  "gap_score": 1-10,
-  "category": ["saas", "automation", "devtool", "b2b", "productivity"]
-}`
+CRITICAL RULES:
+1. If market is saturated (AI writing, analytics, CRM, etc.) → solutionGap = 1-3
+2. If person wants FREE → willingnessToPay = 1-2
+3. If "overwhelmed by options" → solutionGap = 1-2 (solutions EXIST)
+4. If curiosity question ("why is there no...") → willingnessToPay = 1-2
+5. List AT LEAST 3 existing solutions if the market is established
+6. Be skeptical - most posts are NOT good opportunities
+7. **AUTOMATIC LOW GAP**: If you list 3+ existing solutions → solutionGap MUST be 1-5 (not higher)
+8. **NO SYMPATHY SCORING**: Don't give high scores because you feel bad. Be ruthless.
+9. Only score solutionGap >= 7 if person EXPLICITLY said they tried solutions and they FAILED`
 
-      const completion = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        max_tokens: 400,
-      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const model = getModel(currentProvider.provider as any, currentProvider.model as any)
+      const context: Context = {
+        messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
+      }
 
-      const text = completion.choices[0]?.message?.content || ''
+      const response = await complete(model, context, { temperature: 0.1, maxTokens: 600 })
+
+      // Extract text from response
+      let text = ''
+      for (const content of response.content) {
+        if (content.type === 'text') {
+          text += content.text
+        }
+      }
+
       const jsonMatch = text.match(/\{[\s\S]*\}/)
 
       if (jsonMatch) {
         const result = JSON.parse(jsonMatch[0])
 
-        if (result.accept === true) {
-          console.log(`  ✅ ACCEPT: ${result.title} (pain:${result.pain_score}, gap:${result.gap_score})`)
-          validated.push({
-            title: result.title,
-            problem: result.problem,
-            evidence: result.evidence,
-            target_audience: result.target_audience,
-            pain_score: result.pain_score,
-            gap_score: result.gap_score,
-            category: result.category || ['other'],
-            source: opp,
+        const totalScore = calculateTotalScore({
+          painClarity: result.painClarity,
+          solutionGap: result.solutionGap,
+          willingnessToPay: result.willingnessToPay,
+          buildability: result.buildability,
+          validation: result.validation,
+        })
+
+        const isOpportunity = isQualifiedOpportunity(totalScore)
+
+        console.log(`  Scores: pain=${result.painClarity}, gap=${result.solutionGap}, pay=${result.willingnessToPay}, build=${result.buildability}, valid=${result.validation}`)
+        console.log(`  Total: ${totalScore}/100 (min: ${MIN_SCORE})`)
+
+        if (isOpportunity) {
+          console.log(`  ✅ QUALIFIED: ${result.title}`)
+          scored.push({
+            ...result,
+            totalScore,
+            source: point,
           })
         } else {
           rejected++
-          const existing = result.existingSolution ? ` (Exists: ${result.existingSolution})` : ''
-          console.log(`  ❌ REJECT: ${result.reason}${existing}`)
+          const reason = result.solutionGap <= 3
+            ? `Good solution exists (gap=${result.solutionGap})`
+            : `Score too low (${totalScore})`
+          console.log(`  ❌ REJECTED: ${reason}`)
         }
       }
 
-      await new Promise(r => setTimeout(r, 1500))
+      consecutiveErrors = 0
+      await new Promise(r => setTimeout(r, 1000)) // Reduced delay with rotation
     } catch (e: unknown) {
       errors++
+      consecutiveErrors++
       const msg = e instanceof Error ? e.message : String(e)
+      console.log(`  ⚠️ [${currentProvider.provider}] Error: ${msg.slice(0, 60)}`)
+
       if (msg.includes('429') || msg.includes('rate')) {
-        console.log('  ⚠️ Rate limited, stopping')
-        break
+        console.log('  Waiting 5s before retry...')
+        await new Promise(r => setTimeout(r, 5000))
       }
-      console.log(`  ⚠️ Error: ${msg.slice(0, 50)}`)
     }
   }
 
-  return { validated, rejected, errors }
+  console.log(`\n📊 API USAGE: ${apiCalls} calls made`)
+  return { scored, rejected, errors, apiCalls }
 }
 
 /**
- * Check for duplicates in database
+ * Check for duplicates
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function isDuplicate(supabase: any, title: string, url: string): Promise<boolean> {
-  // Check URL
   const { data: urlMatch } = await supabase
     .from('opportunities')
     .select('id')
@@ -133,7 +195,6 @@ async function isDuplicate(supabase: any, title: string, url: string): Promise<b
 
   if (urlMatch?.length) return true
 
-  // Check similar title
   const { data: recent } = await supabase
     .from('opportunities')
     .select('title')
@@ -155,80 +216,101 @@ async function isDuplicate(supabase: any, title: string, url: string): Promise<b
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const debugMode = url.searchParams.get('debug') === 'true'
+  const maxAnalyze = Math.min(parseInt(url.searchParams.get('limit') || '16'), 50)
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const groqKey = process.env.GROQ_API_KEY
 
-  if (!supabaseUrl || !supabaseKey || (!groqKey && !debugMode)) {
-    return NextResponse.json({ error: 'Missing env vars' }, { status: 500 })
+  // Check available providers
+  const providers = getAvailableProviders()
+
+  if (!supabaseUrl || !supabaseKey) {
+    return NextResponse.json({ error: 'Missing Supabase env vars' }, { status: 500 })
   }
 
+  if (providers.length === 0 && !debugMode) {
+    return NextResponse.json({ error: 'No AI providers configured. Set GROQ_API_KEY or GEMINI_API_KEY' }, { status: 500 })
+  }
+
+  console.log(`\n⚠️ CREDIT GUARD: Max ${maxAnalyze} AI calls`)
+  console.log(`📡 Providers: ${providers.map(p => p.provider).join(', ') || 'none (debug mode)'}`)
+
   const results = {
-    version: 'v3',
+    version: 'v2.1-pimono',
+    minScore: MIN_SCORE,
+    providers: providers.map(p => p.provider),
     collected: 0,
-    passedPreFilter: 0,
-    aiValidated: 0,
-    aiRejected: 0,
+    analyzed: 0,
+    qualified: 0,
+    rejected: 0,
     duplicates: 0,
     added: 0,
     errors: 0,
-    opportunities: [] as any[],
+    apiCalls: 0,
+    opportunities: [] as Array<{
+      title: string
+      problem: string
+      totalScore: number
+      existingSolutions: string[]
+      solutionProblems: string[]
+    }>,
   }
 
   try {
     console.log('\n========================================')
-    console.log('  PIPELINE v3 - FOCUSED SEARCH')
+    console.log('  OPPORTUNITY PIPELINE v2.1 (pi-mono)')
+    console.log('  Multi-provider with key rotation')
+    console.log(`  Minimum score: ${MIN_SCORE}/100`)
     console.log('========================================\n')
 
-    // Step 1: Collect with focused searches
-    const raw = await collectOpportunities()
-    results.collected = raw.length
-    results.passedPreFilter = raw.length // Pre-filter happens in collector
+    // Step 1: Collect pain points
+    const painPoints = await collectPainPoints()
+    results.collected = painPoints.length
 
-    if (raw.length === 0) {
-      return NextResponse.json({ message: 'No opportunities found', ...results })
+    if (painPoints.length === 0) {
+      return NextResponse.json({ message: 'No pain points found', ...results })
     }
 
     // Debug mode: return raw for manual review
     if (debugMode) {
       return NextResponse.json({
-        message: 'Debug mode - raw opportunities',
+        message: 'Debug mode - raw pain points',
         ...results,
-        opportunities: raw.slice(0, 30).map((o, i) => ({
+        painPoints: painPoints.slice(0, 30).map((p, i) => ({
           index: i + 1,
-          source: o.source,
-          subreddit: o.subreddit,
-          title: o.title,
-          text: o.text.slice(0, 400),
-          url: o.url,
-          score: o.score,
+          source: p.source,
+          subreddit: p.subreddit,
+          title: p.title,
+          text: p.text.slice(0, 400),
+          url: p.url,
+          score: p.score,
+          comments: p.commentCount,
+          query: p.searchQuery,
         })),
       })
     }
 
-    // Step 2: AI validation (limit to top 20 by score)
-    const groq = new Groq({ apiKey: groqKey })
-    const topOpportunities = raw.slice(0, 20)
+    // Step 2: AI scoring with provider rotation
+    const topPoints = painPoints.slice(0, maxAnalyze)
+    results.analyzed = topPoints.length
+    console.log(`[CREDIT GUARD] Analyzing ${topPoints.length}/${painPoints.length} (limit: ${maxAnalyze})`)
 
-    console.log(`\n[AI] Validating top ${topOpportunities.length} opportunities...`)
-    const { validated, rejected, errors } = await validateWithAI(topOpportunities, groq)
+    const { scored, rejected, errors, apiCalls } = await scoreWithAI(topPoints, providers)
 
-    results.aiValidated = validated.length
-    results.aiRejected = rejected
+    results.qualified = scored.length
+    results.rejected = rejected
     results.errors = errors
+    results.apiCalls = apiCalls
 
-    if (validated.length === 0) {
-      return NextResponse.json({ message: 'No opportunities passed validation', ...results })
+    if (scored.length === 0) {
+      return NextResponse.json({ message: 'No opportunities qualified', ...results })
     }
 
     // Step 3: Save to database
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    for (const opp of validated) {
-      const sourceUrl = opp.source.url
-
-      if (await isDuplicate(supabase, opp.title, sourceUrl)) {
+    for (const opp of scored) {
+      if (await isDuplicate(supabase, opp.title, opp.source.url)) {
         results.duplicates++
         console.log(`  ⏭️ Duplicate: ${opp.title}`)
         continue
@@ -237,11 +319,11 @@ export async function GET(request: NextRequest) {
       const dbEntry = {
         title: opp.title,
         summary: opp.problem,
-        pain_score: opp.pain_score,
-        trend_score: 5,
-        gap_score: opp.gap_score,
-        overall_score: Math.round((opp.pain_score * 0.5 + 5 * 0.2 + opp.gap_score * 0.3) * 10),
-        category: opp.category,
+        pain_score: opp.painClarity,
+        trend_score: opp.validation,
+        gap_score: opp.solutionGap,
+        overall_score: opp.totalScore,
+        category: ['opportunity'],
         keywords: opp.title.toLowerCase().split(/\s+/),
         sources: [{
           platform: opp.source.source,
@@ -249,10 +331,13 @@ export async function GET(request: NextRequest) {
           quote: opp.evidence,
           author: opp.source.author,
         }],
-        competitors: [],
+        competitors: opp.existingSolutions.map(s => ({ name: s, weakness: '' })),
         trend_data: [],
         problem: opp.problem,
-        target_audience: opp.target_audience,
+        target_audience: opp.targetAudience,
+        solution: opp.reasoning,
+        market_size: `Scores: pain=${opp.painClarity}, gap=${opp.solutionGap}, pay=${opp.willingnessToPay}, build=${opp.buildability}, valid=${opp.validation}`,
+        monetization: opp.solutionProblems.join('; '),
       }
 
       const { error } = await supabase.from('opportunities').insert(dbEntry)
@@ -261,13 +346,25 @@ export async function GET(request: NextRequest) {
         results.errors++
       } else {
         results.added++
-        results.opportunities.push({ title: opp.title, problem: opp.problem })
-        console.log(`  💾 Saved: ${opp.title}`)
+        results.opportunities.push({
+          title: opp.title,
+          problem: opp.problem,
+          totalScore: opp.totalScore,
+          existingSolutions: opp.existingSolutions,
+          solutionProblems: opp.solutionProblems,
+        })
+        console.log(`  💾 Saved: ${opp.title} (score: ${opp.totalScore})`)
       }
     }
 
     console.log('\n========================================')
-    console.log(`  RESULTS: ${results.added} added, ${results.aiRejected} rejected`)
+    console.log(`  RESULTS`)
+    console.log(`  Collected: ${results.collected}`)
+    console.log(`  Analyzed: ${results.analyzed}`)
+    console.log(`  API Calls: ${results.apiCalls}`)
+    console.log(`  Qualified: ${results.qualified} (score >= ${MIN_SCORE})`)
+    console.log(`  Rejected: ${results.rejected}`)
+    console.log(`  Added: ${results.added}`)
     console.log('========================================\n')
 
     return NextResponse.json({ message: 'Pipeline complete', ...results })
