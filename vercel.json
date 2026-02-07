@@ -4,5 +4,13 @@
       "path": "/api/pipeline",
       "schedule": "0 8 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/scan/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/pipeline/route.ts": {
+      "maxDuration": 120
+    }
+  }
 }

@@ -1,108 +1,188 @@
-import Link from 'next/link'
-import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
-import { Opportunity } from '@/types/database'
-import { TrendingUp, TrendingDown, Minus, Sparkles } from 'lucide-react'
+'use client'
+
+import { useState } from 'react'
+import { cn } from '@/lib/utils'
+import type { ScoredOpportunity } from '@/types'
+import {
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  DollarSign,
+} from 'lucide-react'
 
 interface OpportunityCardProps {
-  opportunity: Opportunity
+  opportunity: ScoredOpportunity
+}
+
+const sourceColors: Record<string, { bg: string; text: string; label: string }> = {
+  hackernews: { bg: 'bg-orange-500/15', text: 'text-orange-400', label: 'HN' },
+  reddit: { bg: 'bg-blue-500/15', text: 'text-blue-400', label: 'Reddit' },
+  github: { bg: 'bg-gray-500/15', text: 'text-gray-400', label: 'GitHub' },
+  devto: { bg: 'bg-indigo-500/15', text: 'text-indigo-400', label: 'Dev.to' },
+  stackoverflow: { bg: 'bg-amber-500/15', text: 'text-amber-400', label: 'SO' },
+  lobsters: { bg: 'bg-red-500/15', text: 'text-red-400', label: 'Lobsters' },
+  producthunt: { bg: 'bg-orange-600/15', text: 'text-orange-300', label: 'PH' },
+  indiehackers: { bg: 'bg-blue-600/15', text: 'text-blue-300', label: 'IH' },
+  ai_mission: { bg: 'bg-purple-500/15', text: 'text-purple-400', label: 'AI' },
+}
+
+const engagementColors: Record<string, { bg: string; text: string }> = {
+  high: { bg: 'bg-emerald-500/15', text: 'text-emerald-400' },
+  medium: { bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
+  low: { bg: 'bg-gray-500/15', text: 'text-gray-400' },
 }
 
 export function OpportunityCard({ opportunity }: OpportunityCardProps) {
-  const isNew = () => {
-    if (!opportunity.created_at) return false
-    const created = new Date(opportunity.created_at)
-    const now = new Date()
-    const diffDays = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
-    return diffDays <= 7
-  }
+  const [expanded, setExpanded] = useState(false)
 
-  const getTrendIcon = () => {
-    if (opportunity.trend_score >= 7) {
-      return <TrendingUp className="h-4 w-4 text-emerald-500" />
-    } else if (opportunity.trend_score <= 3) {
-      return <TrendingDown className="h-4 w-4 text-red-500" />
-    }
-    return <Minus className="h-4 w-4 text-zinc-500" />
-  }
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-emerald-500'
-    if (score >= 60) return 'text-yellow-500'
-    return 'text-zinc-400'
-  }
-
-  const getScoreBgColor = (score: number) => {
-    if (score >= 80) return 'bg-emerald-500/10 border-emerald-500/20'
-    if (score >= 60) return 'bg-yellow-500/10 border-yellow-500/20'
-    return 'bg-zinc-500/10 border-zinc-500/20'
-  }
+  const borderColor = opportunity.type === 'greenfield' ? '#10b981' : '#8b5cf6'
+  const source = sourceColors[opportunity.source] || sourceColors.ai_mission
+  const engagement = engagementColors[opportunity.engagement] || engagementColors.low
 
   return (
-    <Link href={`/opportunity/${opportunity.id}`}>
-      <Card className="group relative overflow-hidden border-zinc-800 bg-zinc-900/50 p-5 transition-all hover:border-zinc-700 hover:bg-zinc-900">
-        {/* New Badge */}
-        {isNew() && (
-          <div className="absolute left-4 top-4 flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-2 py-0.5 text-xs font-medium text-white">
-            <Sparkles className="h-3 w-3" />
-            New
-          </div>
-        )}
-
-        {/* Score Badge */}
-        <div
-          className={`absolute right-4 top-4 flex h-12 w-12 items-center justify-center rounded-full border ${getScoreBgColor(opportunity.overall_score)}`}
-        >
-          <span className={`text-lg font-bold ${getScoreColor(opportunity.overall_score)}`}>
-            {opportunity.overall_score}
-          </span>
+    <div
+      className={cn(
+        'relative rounded-lg bg-[#12131a] border border-[#1e2030] transition-all duration-200 cursor-pointer',
+        'hover:bg-[#1a1b24] hover:border-[#2a2b3a]',
+        expanded && 'bg-[#1a1b24] border-[#2a2b3a]'
+      )}
+      style={{ borderLeftWidth: '3px', borderLeftColor: borderColor }}
+      onClick={() => setExpanded(!expanded)}
+    >
+      {/* Score pill - top right */}
+      <div className="absolute top-3 right-3">
+        <div className={cn(
+          'flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold',
+          opportunity.score >= 80
+            ? 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30'
+            : opportunity.score >= 60
+              ? 'bg-yellow-500/15 text-yellow-400 ring-1 ring-yellow-500/30'
+              : 'bg-gray-500/15 text-gray-400 ring-1 ring-gray-500/30'
+        )}>
+          {opportunity.score}
         </div>
+      </div>
 
+      <div className="p-4 pr-16">
         {/* Title */}
-        <h3 className={`mb-2 pr-16 text-lg font-semibold text-white group-hover:text-emerald-400 transition-colors ${isNew() ? 'mt-6' : ''}`}>
+        <h3 className="text-sm font-semibold text-white mb-1.5 leading-tight">
           {opportunity.title}
         </h3>
 
-        {/* Summary */}
-        <p className="mb-4 text-sm text-zinc-400 line-clamp-2">{opportunity.summary}</p>
+        {/* Problem preview */}
+        <p className="text-xs text-[#9ca3af] line-clamp-2 mb-3 leading-relaxed">
+          {opportunity.problem}
+        </p>
 
-        {/* Scores */}
-        <div className="mb-4 flex gap-4">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-zinc-500">Pain</span>
-            <span className="text-sm font-medium text-white">{opportunity.pain_score}/10</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-zinc-500">Trend</span>
-            <div className="flex items-center gap-1">
-              {getTrendIcon()}
-              <span className="text-sm font-medium text-white">{opportunity.trend_score}/10</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-zinc-500">Gap</span>
-            <span className="text-sm font-medium text-white">{opportunity.gap_score}/10</span>
-          </div>
+        {/* Badges row */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium', source.bg, source.text)}>
+            {source.label}
+          </span>
+          <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium', engagement.bg, engagement.text)}>
+            {opportunity.engagement}
+          </span>
+          <span className={cn(
+            'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium',
+            opportunity.type === 'greenfield'
+              ? 'bg-emerald-500/15 text-emerald-400'
+              : 'bg-purple-500/15 text-purple-400'
+          )}>
+            {opportunity.type === 'greenfield' ? 'Greenfield' : 'Improve'}
+          </span>
         </div>
+      </div>
 
-        {/* Categories */}
-        <div className="flex flex-wrap gap-1.5">
-          {opportunity.category.slice(0, 3).map((cat) => (
-            <Badge
-              key={cat}
-              variant="secondary"
-              className="bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-xs"
+      {/* Expanded content */}
+      <div className={cn(
+        'overflow-hidden transition-all duration-300',
+        expanded ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
+      )}>
+        <div className="px-4 pb-4 pt-1 border-t border-[#1e2030] space-y-3">
+          {/* Full problem */}
+          <div>
+            <p className="text-xs font-medium text-[#6b7280] uppercase tracking-wider mb-1">Problem</p>
+            <p className="text-sm text-[#9ca3af] leading-relaxed">{opportunity.problem}</p>
+          </div>
+
+          {/* Workaround */}
+          {opportunity.workaround && (
+            <div>
+              <p className="text-xs font-medium text-[#6b7280] uppercase tracking-wider mb-1">Current Workaround</p>
+              <p className="text-sm text-[#9ca3af]">{opportunity.workaround}</p>
+            </div>
+          )}
+
+          {/* Existing tools */}
+          {opportunity.existingTool && (
+            <div>
+              <p className="text-xs font-medium text-[#6b7280] uppercase tracking-wider mb-1">Existing Tool</p>
+              <p className="text-sm text-[#9ca3af]">{opportunity.existingTool}</p>
+            </div>
+          )}
+
+          {/* Competitors */}
+          {opportunity.competitors && opportunity.competitors.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-[#6b7280] uppercase tracking-wider mb-1">Competitors</p>
+              <div className="flex flex-wrap gap-1">
+                {opportunity.competitors.map((comp, i) => (
+                  <span key={i} className="text-xs px-2 py-0.5 rounded bg-[#1e2030] text-[#9ca3af]">
+                    {comp}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Willingness to pay */}
+          {opportunity.willingness_to_pay && (
+            <div className="flex items-center gap-1.5">
+              <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+              <span className="text-sm text-emerald-400">{opportunity.willingness_to_pay}</span>
+            </div>
+          )}
+
+          {/* Score breakdown */}
+          <div className="grid grid-cols-5 gap-2 pt-2">
+            {[
+              { label: 'Demand', value: opportunity.demandScore, max: 30 },
+              { label: 'Recency', value: opportunity.recencyScore, max: 20 },
+              { label: 'Build', value: opportunity.buildabilityScore, max: 20 },
+              { label: 'Source', value: opportunity.sourceQualityScore, max: 15 },
+              { label: 'Market', value: opportunity.marketSignalScore, max: 15 },
+            ].map((s) => (
+              <div key={s.label} className="text-center">
+                <div className="text-xs font-mono text-white">{s.value}/{s.max}</div>
+                <div className="text-[10px] text-[#6b7280]">{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* URL link */}
+          {opportunity.url && (
+            <a
+              href={opportunity.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 transition-colors mt-1"
             >
-              {cat}
-            </Badge>
-          ))}
-          {opportunity.category.length > 3 && (
-            <Badge variant="secondary" className="bg-zinc-800 text-zinc-500 text-xs">
-              +{opportunity.category.length - 3}
-            </Badge>
+              <ExternalLink className="h-3 w-3" />
+              View source
+            </a>
           )}
         </div>
-      </Card>
-    </Link>
+      </div>
+
+      {/* Expand indicator */}
+      <div className="flex justify-center pb-1">
+        {expanded ? (
+          <ChevronUp className="h-4 w-4 text-[#6b7280]" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-[#6b7280]" />
+        )}
+      </div>
+    </div>
   )
 }

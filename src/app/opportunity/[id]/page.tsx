@@ -6,7 +6,7 @@ import { ScoreRing } from '@/components/score-ring'
 import { TrendChart } from '@/components/trend-chart'
 import { ArrowLeft, ExternalLink, Target, TrendingUp, Layers, Quote, Users, DollarSign, Lightbulb, Wrench } from 'lucide-react'
 import { createServerClient } from '@/lib/supabase'
-import { Opportunity } from '@/types/database'
+import type { Opportunity } from '@/types'
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -268,7 +268,7 @@ export default async function OpportunityPage({ params }: PageProps) {
         <div className="mb-12">
           <h2 className="text-2xl font-bold mb-6">Competitor Analysis</h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {opportunity.competitors.map((comp: { name: string; rating: number; weakness: string }, index: number) => (
+            {opportunity.competitors.map((comp: { name: string; rating?: number; weakness: string }, index: number) => (
               <Card key={index} className="border-zinc-800 bg-zinc-900/30 p-6">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-white">{comp.name}</h3>
