@@ -7,10 +7,10 @@
   ],
   "functions": {
     "src/app/api/scan/route.ts": {
-      "maxDuration": 120
+      "maxDuration": 60
     },
     "src/app/api/pipeline/route.ts": {
-      "maxDuration": 120
+      "maxDuration": 60
     }
   }
 }
