@@ -1,0 +1,220 @@
+import * as dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+import { createServerClient } from "../lib/supabase";
+import { getGroqClient, GROQ_MODEL } from "../lib/groq";
+import { AIExtraction, PainCategory } from "../lib/types";
+import { findOrCreateProduct } from "../lib/normalize";
+import { passesPreFilter } from "./stage1-filter";
+import { sleep } from "../lib/utils";
+
+const MAX_PER_RUN = 200;
+
+const EXTRACTION_PROMPT = `You are a B2B software complaint analyst. Analyze this review/complaint and extract structured data.
+
+REVIEW TEXT:
+{text}
+
+SOURCE: {source} ({url})
+
+Respond with ONLY valid JSON (no markdown, no backticks):
+{
+  "product_name": "exact product name being complained about (or null if unclear)",
+  "product_category": "software category (e.g., 'Field Service Management', 'CRM', 'Accounting')",
+  "pain_categories": ["array of categories from: pricing, ux, support, reliability, features, onboarding, mobile, contracts, integrations, scaling"],
+  "pain_summary": "one sentence summary of the core complaint",
+  "severity": 7,
+  "wishes": "what the user wishes existed instead (or null)",
+  "specific_feature_gaps": ["array of specific missing features or improvements needed"],
+  "competitor_mentions": ["other products mentioned positively or as alternatives"],
+  "estimated_monthly_spend": "estimated monthly cost range like '$50-100' or null if unknown",
+  "user_segment": "who is complaining: 'small_business', 'mid_market', 'enterprise', 'freelancer', or null",
+  "switching_intent": "none|considering|actively_looking|already_switched",
+  "is_valid_complaint": true
+}`;
+
+const VALID_PAIN_CATEGORIES: PainCategory[] = [
+  "pricing", "ux", "support", "reliability", "features",
+  "onboarding", "mobile", "contracts", "integrations", "scaling",
+];
+
+function parseExtraction(raw: string): AIExtraction | null {
+  try {
+    let json = raw.trim();
+    if (json.startsWith("```")) {
+      json = json.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+    }
+    const parsed = JSON.parse(json);
+
+    if (!parsed.is_valid_complaint) return null;
+
+    // Validate pain categories
+    const validCategories = (parsed.pain_categories || []).filter(
+      (c: string) => VALID_PAIN_CATEGORIES.includes(c as PainCategory)
+    );
+
+    return {
+      product_name: parsed.product_name || null,
+      product_category: parsed.product_category || null,
+      pain_categories: validCategories,
+      pain_summary: parsed.pain_summary || "",
+      severity: Math.max(1, Math.min(10, Math.round(parsed.severity || 5))),
+      wishes: parsed.wishes || null,
+      specific_feature_gaps: parsed.specific_feature_gaps || [],
+      competitor_mentions: parsed.competitor_mentions || [],
+      estimated_monthly_spend: parsed.estimated_monthly_spend || null,
+      user_segment: parsed.user_segment || null,
+      switching_intent: parsed.switching_intent || "none",
+      is_valid_complaint: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function analyzeComplaint(
+  text: string,
+  source: string,
+  url: string
+): Promise<AIExtraction | null> {
+  const groq = getGroqClient();
+  const prompt = EXTRACTION_PROMPT
+    .replace("{text}", text.substring(0, 2000))
+    .replace("{source}", source)
+    .replace("{url}", url || "");
+
+  try {
+    const response = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_tokens: 500,
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) return null;
+    return parseExtraction(content);
+  } catch (error: unknown) {
+    if (error && typeof error === "object" && "status" in error && error.status === 429) {
+      throw error; // Re-throw rate limits
+    }
+    console.error("  Groq API error:", error);
+    return null;
+  }
+}
+
+async function main() {
+  const supabase = createServerClient();
+
+  // Fetch unanalyzed complaints
+  const { data: complaints, error } = await supabase
+    .from("complaints")
+    .select("*")
+    .eq("analyzed", false)
+    .is("product_id", null)
+    .order("collected_at", { ascending: true })
+    .limit(MAX_PER_RUN * 3); // Fetch extra since many will be filtered
+
+  if (error || !complaints) {
+    console.error("Failed to fetch complaints:", error?.message);
+    process.exit(1);
+  }
+
+  console.log(`Stage 2: ${complaints.length} unanalyzed complaints`);
+
+  // Apply Stage 1 filter
+  const filtered = complaints.filter((c) => {
+    const text = `${c.title || ""} ${c.raw_text}`;
+    return passesPreFilter(text).passes;
+  });
+
+  console.log(`  Passed pre-filter: ${filtered.length}`);
+  const toAnalyze = filtered.slice(0, MAX_PER_RUN);
+  console.log(`  Analyzing: ${toAnalyze.length}`);
+
+  // Mark filtered-out complaints as analyzed (no product) so we don't reprocess
+  const filteredOutIds = complaints
+    .filter((c) => !filtered.includes(c))
+    .map((c) => c.id);
+
+  if (filteredOutIds.length > 0) {
+    await supabase
+      .from("complaints")
+      .update({ analyzed: true })
+      .in("id", filteredOutIds);
+    console.log(`  Marked ${filteredOutIds.length} filtered-out as analyzed`);
+  }
+
+  let analyzed = 0;
+  let linked = 0;
+  let quotaHit = false;
+
+  for (const complaint of toAnalyze) {
+    const text = `${complaint.title || ""}\n${complaint.raw_text}`;
+
+    try {
+      const extraction = await analyzeComplaint(
+        text,
+        complaint.source,
+        complaint.source_url
+      );
+
+      analyzed++;
+
+      if (!extraction || !extraction.product_name) {
+        // Valid complaint but no clear product — mark as analyzed
+        await supabase
+          .from("complaints")
+          .update({ analyzed: true })
+          .eq("id", complaint.id);
+        continue;
+      }
+
+      // Find or create the product
+      const product = await findOrCreateProduct(
+        extraction.product_name,
+        extraction.product_category || undefined
+      );
+
+      // Update complaint with extraction data + link to product
+      await supabase
+        .from("complaints")
+        .update({
+          product_id: product.id,
+          pain_categories: extraction.pain_categories,
+          pain_summary: extraction.pain_summary,
+          severity: extraction.severity,
+          wishes: extraction.wishes,
+          specific_feature_gaps: extraction.specific_feature_gaps,
+          competitor_mentions: extraction.competitor_mentions,
+          switching_intent: extraction.switching_intent,
+          user_segment: extraction.user_segment,
+          analyzed: true,
+        })
+        .eq("id", complaint.id);
+
+      linked++;
+      console.log(
+        `  [${analyzed}/${toAnalyze.length}] ${extraction.product_name} — ${extraction.pain_summary?.substring(0, 60)}`
+      );
+    } catch (error: unknown) {
+      if (error && typeof error === "object" && "status" in error && error.status === 429) {
+        console.log("  Groq rate limit hit, stopping.");
+        quotaHit = true;
+        break;
+      }
+      console.error(`  Error analyzing complaint ${complaint.id}:`, error);
+      await supabase
+        .from("complaints")
+        .update({ analyzed: true })
+        .eq("id", complaint.id);
+    }
+
+    await sleep(200);
+  }
+
+  console.log(`\nStage 2 complete: ${analyzed} analyzed, ${linked} linked to products`);
+  if (quotaHit) console.log("  (stopped early due to rate limit)");
+}
+
+main();
