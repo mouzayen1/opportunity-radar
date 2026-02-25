@@ -1,21 +1,33 @@
 {
-  "name": "opportunity-radar-v2",
-  "version": "2.0.0",
+  "name": "painradar",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "collect": "npx tsx src/collectors/run-collection.ts"
+    "collect:discussions": "npx tsx src/collectors/reddit.ts && npx tsx src/collectors/hackernews.ts",
+    "collect:reviews": "npx tsx src/collectors/g2.ts && npx tsx src/collectors/capterra.ts && npx tsx src/collectors/trustpilot.ts",
+    "analyze": "npx tsx src/collectors/stage1-filter.ts && npx tsx src/collectors/stage2-extract.ts && npx tsx src/collectors/stage3-score.ts",
+    "seed": "npx tsx scripts/seed-categories.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
-    "dotenv": "^17.2.3",
+    "cheerio": "^1.0.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.0",
     "groq-sdk": "^0.5.0",
-    "next": "^16.1.6",
+    "lucide-react": "^0.400.0",
+    "next": "^14.2.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "recharts": "^2.12.0",
+    "slugify": "^1.6.6",
+    "tailwind-merge": "^2.3.0",
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/node": "^20.14.12",
