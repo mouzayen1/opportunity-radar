@@ -103,7 +103,8 @@ async function analyzeComplaint(
   }
 }
 
-export async function runStage2() {
+export async function runStage2(options?: { maxItems?: number }) {
+  const limit = options?.maxItems || MAX_PER_RUN;
   const supabase = createServerClient();
 
   // Fetch unanalyzed complaints
@@ -113,7 +114,7 @@ export async function runStage2() {
     .eq("analyzed", false)
     .is("product_id", null)
     .order("collected_at", { ascending: true })
-    .limit(MAX_PER_RUN * 3); // Fetch extra since many will be filtered
+    .limit(limit * 3); // Fetch extra since many will be filtered
 
   if (error || !complaints) {
     console.error("Failed to fetch complaints:", error?.message);
@@ -129,7 +130,7 @@ export async function runStage2() {
   });
 
   console.log(`  Passed pre-filter: ${filtered.length}`);
-  const toAnalyze = filtered.slice(0, MAX_PER_RUN);
+  const toAnalyze = filtered.slice(0, limit);
   console.log(`  Analyzing: ${toAnalyze.length}`);
 
   // Mark filtered-out complaints as analyzed (no product) so we don't reprocess

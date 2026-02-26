@@ -94,7 +94,8 @@ export async function POST(request: NextRequest) {
       }
 
       case "extract": {
-        const result = await runStage2();
+        // Limit to 10 items per run to fit within 60s timeout
+        const result = await runStage2({ maxItems: 10 });
         return NextResponse.json({
           success: true,
           stage: "AI Extraction",
