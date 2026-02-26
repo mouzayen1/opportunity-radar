@@ -145,9 +145,23 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      case "reset": {
+        const supabase = createServerClient();
+        // Delete all complaints and products, start fresh
+        await supabase.from("complaints").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        await supabase.from("products").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        await supabase.from("product_pain_summary").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        await supabase.from("collection_runs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+        return NextResponse.json({
+          success: true,
+          stage: "Reset",
+          result: "All complaints, products, and collection runs cleared",
+        });
+      }
+
       default:
         return NextResponse.json(
-          { success: false, error: "Use ?stage=hn|reddit|extract|score" },
+          { success: false, error: "Use ?stage=hn|reddit|extract|score|reset" },
           { status: 400 }
         );
     }

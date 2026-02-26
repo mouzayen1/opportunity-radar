@@ -155,10 +155,10 @@ export async function runStage2(options?: { maxItems?: number }) {
 
   console.log(`Stage 2: ${complaints.length} unanalyzed complaints`);
 
-  // Apply Stage 1 filter
+  // Apply Stage 1 filter (pre-linked complaints get a lighter filter)
   const filtered = complaints.filter((c) => {
     const text = `${c.title || ""} ${c.raw_text}`;
-    return passesPreFilter(text).passes;
+    return passesPreFilter(text, { preLinked: !!c.product_id }).passes;
   });
 
   console.log(`  Passed pre-filter: ${filtered.length}`);

@@ -103,6 +103,7 @@ export default function Home() {
     setPipelineSteps([]);
 
     const stages = [
+      { id: "reset", label: "Clearing old data..." },
       { id: "hn", label: "Collecting from HackerNews..." },
       { id: "reddit", label: "Collecting from Reddit..." },
       { id: "extract", label: "Running AI extraction..." },

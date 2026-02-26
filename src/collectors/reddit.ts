@@ -7,6 +7,9 @@ import { sleep } from "../lib/utils";
 const USER_AGENT = "PainRadar/3.0 (B2B software complaint discovery)";
 const BASE_DELAY = 2000;
 
+// Generic terms to skip — only search for actual product names
+const GENERIC_TERM_PATTERNS = /\b(software|tool|system|platform|alternative|management|solution)\b/i;
+
 interface RedditPost {
   id: string;
   title: string;
@@ -84,10 +87,11 @@ export async function collectFromReddit(options?: { maxProducts?: number }): Pro
 
   const categories = await getCategoriesFromDB();
 
-  // Build product term → subreddits pairs from categories
+  // Build product name → subreddits pairs, skipping generic terms
   const pairMap = new Map<string, Set<string>>();
   for (const cat of categories) {
     for (const term of cat.hn_search_terms || []) {
+      if (GENERIC_TERM_PATTERNS.test(term)) continue; // skip generic
       if (!pairMap.has(term)) pairMap.set(term, new Set());
       for (const sub of cat.subreddits || []) {
         pairMap.get(term)!.add(sub);
@@ -95,7 +99,6 @@ export async function collectFromReddit(options?: { maxProducts?: number }): Pro
     }
   }
 
-  // Convert to array and apply limits
   let productTerms = [...pairMap.keys()];
   if (options?.maxProducts) {
     productTerms = productTerms.slice(0, options.maxProducts);
@@ -105,15 +108,15 @@ export async function collectFromReddit(options?: { maxProducts?: number }): Pro
   for (const term of productTerms) {
     totalSearches += pairMap.get(term)!.size;
   }
-  console.log(`  Searching ${productTerms.length} product terms across ${totalSearches} subreddit pairs`);
+  console.log(`  Searching ${productTerms.length} products across ${totalSearches} subreddit pairs`);
 
   for (const term of productTerms) {
     const subreddits = pairMap.get(term)!;
 
     for (const subreddit of subreddits) {
-      console.log(`  Searching r/${subreddit} for "${term}"...`);
+      console.log(`  r/${subreddit}: "${term}"`);
 
-      const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(term)}&restrict_sr=on&sort=new&t=month&limit=50`;
+      const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(term)}&restrict_sr=on&sort=new&t=year&limit=50`;
       const data = await fetchWithRetry(url);
 
       if (data?.data?.children) {
@@ -131,7 +134,7 @@ export async function collectFromReddit(options?: { maxProducts?: number }): Pro
   }
 
   const items = Array.from(allPosts.values());
-  console.log(`  Found ${items.length} unique Reddit posts across ${productTerms.length} product terms`);
+  console.log(`  Found ${items.length} unique Reddit posts across ${productTerms.length} products`);
   return items;
 }
 

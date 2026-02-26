@@ -29,7 +29,10 @@ const NOISE_PATTERNS = [
   /\b(subscribe|follow me|my channel|my blog|my newsletter)\b/i,
 ];
 
-export function passesPreFilter(text: string): { passes: boolean; signalCount: number } {
+export function passesPreFilter(
+  text: string,
+  options?: { preLinked?: boolean }
+): { passes: boolean; signalCount: number } {
   if (text.length < 50) return { passes: false, signalCount: 0 };
 
   for (const pattern of NOISE_PATTERNS) {
@@ -42,7 +45,10 @@ export function passesPreFilter(text: string): { passes: boolean; signalCount: n
     if (lowerText.includes(signal)) signalCount++;
   }
 
-  return { passes: signalCount >= 2, signalCount };
+  // Pre-linked complaints (product already known) only need 1 signal
+  // Unlinked complaints need 2+ signals for higher confidence
+  const minSignals = options?.preLinked ? 1 : 2;
+  return { passes: signalCount >= minSignals, signalCount };
 }
 
 // Standalone: log filter stats for unanalyzed complaints
@@ -51,9 +57,8 @@ async function main() {
 
   const { data: complaints, error } = await supabase
     .from("complaints")
-    .select("id, raw_text, title")
-    .eq("analyzed", false)
-    .is("product_id", null);
+    .select("id, raw_text, title, product_id")
+    .eq("analyzed", false);
 
   if (error || !complaints) {
     console.error("Failed to fetch complaints:", error?.message);
@@ -67,7 +72,7 @@ async function main() {
 
   for (const c of complaints) {
     const text = `${c.title || ""} ${c.raw_text}`;
-    const result = passesPreFilter(text);
+    const result = passesPreFilter(text, { preLinked: !!c.product_id });
     if (result.passes) passed++;
     else failed++;
   }
