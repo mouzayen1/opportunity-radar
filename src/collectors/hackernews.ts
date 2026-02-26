@@ -6,20 +6,6 @@ import { sleep } from "../lib/utils";
 
 const ALGOLIA_BASE = "https://hn.algolia.com/api/v1";
 
-// Generic complaint search queries
-const COMPLAINT_QUERIES = [
-  "alternative to",
-  "switched from",
-  "hate using",
-  "frustrated with",
-  "worst software",
-  "terrible software",
-  "overpriced software",
-  "looking for alternative",
-  "replacing",
-  "too expensive",
-];
-
 interface AlgoliaHit {
   objectID: string;
   title?: string;
@@ -54,7 +40,7 @@ async function searchHN(
   }
 }
 
-function hitToComplaint(hit: AlgoliaHit): RawComplaint | null {
+function hitToComplaint(hit: AlgoliaHit, targetProduct: string): RawComplaint | null {
   const text = hit.comment_text || hit.story_text || "";
   const title = hit.title || hit.story_title || null;
   if (!text && !title) return null;
@@ -70,46 +56,45 @@ function hitToComplaint(hit: AlgoliaHit): RawComplaint | null {
     author_company_size: null,
     star_rating: null,
     review_date: new Date(hit.created_at),
+    target_product: targetProduct,
   };
 }
 
-async function getSearchTermsFromDB(): Promise<string[]> {
+async function getProductTermsFromDB(): Promise<string[]> {
   const supabase = createServerClient();
   const { data } = await supabase
     .from("monitored_categories")
     .select("hn_search_terms")
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .order("priority", { ascending: false });
 
   if (!data) return [];
-  return data.flatMap((row) => row.hn_search_terms || []);
+  const allTerms = data.flatMap((row) => row.hn_search_terms || []);
+  return [...new Set(allTerms)];
 }
 
-export async function collectFromHackerNews(options?: { maxQueries?: number; skipCategoryTerms?: boolean }): Promise<RawComplaint[]> {
-  console.log("Collecting from Hacker News...");
+export async function collectFromHackerNews(options?: { maxProducts?: number }): Promise<RawComplaint[]> {
+  console.log("Collecting from Hacker News (product-centric)...");
   const allItems = new Map<string, RawComplaint>();
 
-  let uniqueQueries: string[];
-  if (options?.skipCategoryTerms) {
-    uniqueQueries = [...COMPLAINT_QUERIES];
-  } else {
-    const categoryTerms = await getSearchTermsFromDB();
-    uniqueQueries = [...new Set([...COMPLAINT_QUERIES, ...categoryTerms])];
-  }
-  if (options?.maxQueries) {
-    uniqueQueries = uniqueQueries.slice(0, options.maxQueries);
+  let productTerms = await getProductTermsFromDB();
+  if (options?.maxProducts) {
+    productTerms = productTerms.slice(0, options.maxProducts);
   }
 
-  for (const query of uniqueQueries) {
-    console.log(`  Searching HN for: "${query}"`);
+  console.log(`  Searching for ${productTerms.length} product terms`);
 
-    // Search both stories and comments
+  for (const term of productTerms) {
+    console.log(`  Searching HN for: "${term}"`);
+
+    // Search both stories and comments for this product name
     const [stories, comments] = await Promise.all([
-      searchHN(query, "story"),
-      searchHN(query, "comment"),
+      searchHN(term, "story"),
+      searchHN(term, "comment"),
     ]);
 
     for (const hit of [...stories, ...comments]) {
-      const complaint = hitToComplaint(hit);
+      const complaint = hitToComplaint(hit, term);
       if (complaint && !allItems.has(complaint.source_id)) {
         allItems.set(complaint.source_id, complaint);
       }
@@ -119,7 +104,7 @@ export async function collectFromHackerNews(options?: { maxQueries?: number; ski
   }
 
   const items = Array.from(allItems.values());
-  console.log(`  Found ${items.length} unique HN items`);
+  console.log(`  Found ${items.length} unique HN items across ${productTerms.length} product terms`);
   return items;
 }
 
@@ -137,7 +122,7 @@ async function main() {
   try {
     const items = await collectFromHackerNews();
 
-    // Insert complaints (no product_id yet — Stage 2 will set it)
+    // Insert complaints (product pre-linking happens in pipeline route)
     let newCount = 0;
     for (const item of items) {
       const { error } = await supabase.from("complaints").upsert(

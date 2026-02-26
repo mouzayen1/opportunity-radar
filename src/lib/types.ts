@@ -181,6 +181,7 @@ export interface RawComplaint {
   author_company_size: string | null;
   star_rating: number | null;
   review_date: Date;
+  target_product?: string;
 }
 
 export interface AIExtraction {

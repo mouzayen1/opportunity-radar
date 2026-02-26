@@ -7,19 +7,6 @@ import { sleep } from "../lib/utils";
 const USER_AGENT = "PainRadar/3.0 (B2B software complaint discovery)";
 const BASE_DELAY = 2000;
 
-const COMPLAINT_QUERIES = [
-  "hate",
-  "terrible",
-  "worst",
-  "alternative to",
-  "switched from",
-  "frustrated with",
-  "overpriced",
-  "looking for alternative",
-  "replacing",
-  "worst software",
-];
-
 interface RedditPost {
   id: string;
   title: string;
@@ -58,7 +45,7 @@ async function fetchWithRetry(url: string, maxRetries = 3): Promise<any | null> 
   return null;
 }
 
-function postToComplaint(post: RedditPost): RawComplaint {
+function postToComplaint(post: RedditPost, targetProduct: string): RawComplaint {
   return {
     source: "reddit",
     source_id: `${post.subreddit}_${post.id}`,
@@ -70,43 +57,69 @@ function postToComplaint(post: RedditPost): RawComplaint {
     author_company_size: null,
     star_rating: null,
     review_date: new Date(post.created_utc * 1000),
+    target_product: targetProduct,
   };
 }
 
-async function getSubredditsFromDB(): Promise<string[]> {
+interface CategoryConfig {
+  name: string;
+  subreddits: string[];
+  hn_search_terms: string[];
+}
+
+async function getCategoriesFromDB(): Promise<CategoryConfig[]> {
   const supabase = createServerClient();
   const { data } = await supabase
     .from("monitored_categories")
-    .select("subreddits")
-    .eq("is_active", true);
+    .select("name, subreddits, hn_search_terms")
+    .eq("is_active", true)
+    .order("priority", { ascending: false });
 
-  if (!data) return [];
-  const all = data.flatMap((row) => row.subreddits || []);
-  return [...new Set(all)];
+  return (data as CategoryConfig[]) || [];
 }
 
-export async function collectFromReddit(options?: { maxSubreddits?: number; maxQueries?: number }): Promise<RawComplaint[]> {
-  console.log("Collecting from Reddit...");
+export async function collectFromReddit(options?: { maxProducts?: number }): Promise<RawComplaint[]> {
+  console.log("Collecting from Reddit (product-centric)...");
   const allPosts = new Map<string, RawComplaint>();
 
-  let subreddits = await getSubredditsFromDB();
-  if (options?.maxSubreddits) {
-    subreddits = subreddits.slice(0, options.maxSubreddits);
+  const categories = await getCategoriesFromDB();
+
+  // Build product term → subreddits pairs from categories
+  const pairMap = new Map<string, Set<string>>();
+  for (const cat of categories) {
+    for (const term of cat.hn_search_terms || []) {
+      if (!pairMap.has(term)) pairMap.set(term, new Set());
+      for (const sub of cat.subreddits || []) {
+        pairMap.get(term)!.add(sub);
+      }
+    }
   }
-  const queries = options?.maxQueries ? COMPLAINT_QUERIES.slice(0, options.maxQueries) : COMPLAINT_QUERIES;
-  console.log(`  Scanning ${subreddits.length} subreddits with ${queries.length} queries`);
 
-  for (const subreddit of subreddits) {
-    console.log(`  Searching r/${subreddit}...`);
+  // Convert to array and apply limits
+  let productTerms = [...pairMap.keys()];
+  if (options?.maxProducts) {
+    productTerms = productTerms.slice(0, options.maxProducts);
+  }
 
-    for (const query of queries) {
-      const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(query)}&restrict_sr=on&sort=new&t=month&limit=50`;
+  let totalSearches = 0;
+  for (const term of productTerms) {
+    totalSearches += pairMap.get(term)!.size;
+  }
+  console.log(`  Searching ${productTerms.length} product terms across ${totalSearches} subreddit pairs`);
+
+  for (const term of productTerms) {
+    const subreddits = pairMap.get(term)!;
+
+    for (const subreddit of subreddits) {
+      console.log(`  Searching r/${subreddit} for "${term}"...`);
+
+      const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(term)}&restrict_sr=on&sort=new&t=month&limit=50`;
       const data = await fetchWithRetry(url);
 
       if (data?.data?.children) {
         for (const child of data.data.children) {
           const post = child.data as RedditPost;
-          const complaint = postToComplaint(post);
+          const complaint = postToComplaint(post, term);
           if (!allPosts.has(complaint.source_id)) {
             allPosts.set(complaint.source_id, complaint);
           }
@@ -118,7 +131,7 @@ export async function collectFromReddit(options?: { maxSubreddits?: number; maxQ
   }
 
   const items = Array.from(allPosts.values());
-  console.log(`  Found ${items.length} unique Reddit posts`);
+  console.log(`  Found ${items.length} unique Reddit posts across ${productTerms.length} product terms`);
   return items;
 }
 

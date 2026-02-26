@@ -4,10 +4,18 @@ import { collectFromReddit } from "@/collectors/reddit";
 import { runStage2 } from "@/collectors/stage2-extract";
 import { runStage3 } from "@/collectors/stage3-score";
 import { createServerClient } from "@/lib/supabase";
+import { findOrCreateProduct } from "@/lib/normalize";
 import { RawComplaint } from "@/lib/types";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
+
+// Generic terms that should NOT be pre-linked as product names
+const GENERIC_TERM_PATTERNS = /\b(software|tool|system|platform|alternative|management|solution)\b/i;
+
+function isLikelyProductName(term: string): boolean {
+  return !GENERIC_TERM_PATTERNS.test(term);
+}
 
 async function saveComplaints(items: RawComplaint[], source: string) {
   const supabase = createServerClient();
@@ -18,23 +26,48 @@ async function saveComplaints(items: RawComplaint[], source: string) {
     .select("id")
     .single();
 
+  // Pre-resolve product IDs for items with target_product
+  const productIdCache = new Map<string, string>();
+  const termsToResolve = new Set<string>();
+  for (const item of items) {
+    if (item.target_product && isLikelyProductName(item.target_product)) {
+      termsToResolve.add(item.target_product);
+    }
+  }
+
+  for (const term of termsToResolve) {
+    try {
+      const product = await findOrCreateProduct(term);
+      productIdCache.set(term, product.id);
+    } catch (err) {
+      console.error(`  Failed to resolve product for "${term}":`, err);
+    }
+  }
+
   // Batch insert in chunks of 50 for speed
   let newCount = 0;
   const BATCH_SIZE = 50;
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
-    const batch = items.slice(i, i + BATCH_SIZE).map((item) => ({
-      source: item.source,
-      source_id: item.source_id,
-      source_url: item.source_url,
-      title: item.title,
-      raw_text: (item.raw_text || "").substring(0, 2000),
-      author: item.author,
-      review_date:
-        item.review_date instanceof Date
-          ? item.review_date.toISOString()
-          : item.review_date,
-      analyzed: false,
-    }));
+    const batch = items.slice(i, i + BATCH_SIZE).map((item) => {
+      const productId = item.target_product
+        ? productIdCache.get(item.target_product) || null
+        : null;
+
+      return {
+        source: item.source,
+        source_id: item.source_id,
+        source_url: item.source_url,
+        title: item.title,
+        raw_text: (item.raw_text || "").substring(0, 2000),
+        author: item.author,
+        review_date:
+          item.review_date instanceof Date
+            ? item.review_date.toISOString()
+            : item.review_date,
+        analyzed: false,
+        ...(productId ? { product_id: productId } : {}),
+      };
+    });
 
     const { data } = await supabase
       .from("complaints")
@@ -56,7 +89,11 @@ async function saveComplaints(items: RawComplaint[], source: string) {
       .eq("id", run.id);
   }
 
-  return { found: items.length, saved: newCount };
+  const preLinked = items.filter(
+    (i) => i.target_product && productIdCache.has(i.target_product)
+  ).length;
+
+  return { found: items.length, saved: newCount, preLinked };
 }
 
 export async function POST(request: NextRequest) {
@@ -66,30 +103,26 @@ export async function POST(request: NextRequest) {
   try {
     switch (stage) {
       case "hn": {
-        // Limit to 5 queries, skip slow category term lookups
         const items = await collectFromHackerNews({
-          maxQueries: 5,
-          skipCategoryTerms: true,
+          maxProducts: 10,
         });
         const result = await saveComplaints(items, "hackernews");
         return NextResponse.json({
           success: true,
           stage: "HackerNews Collection",
-          result: `${result.found} found, ${result.saved} new`,
+          result: `${result.found} found, ${result.saved} new, ${result.preLinked} pre-linked`,
         });
       }
 
       case "reddit": {
-        // Limit to 5 subreddits and 3 queries to fit within 60s
         const items = await collectFromReddit({
-          maxSubreddits: 5,
-          maxQueries: 3,
+          maxProducts: 5,
         });
         const result = await saveComplaints(items, "reddit");
         return NextResponse.json({
           success: true,
           stage: "Reddit Collection",
-          result: `${result.found} found, ${result.saved} new`,
+          result: `${result.found} found, ${result.saved} new, ${result.preLinked} pre-linked`,
         });
       }
 

@@ -32,12 +32,34 @@ Respond with ONLY valid JSON (no markdown, no backticks):
   "is_valid_complaint": true
 }`;
 
+const PRELINKED_EXTRACTION_PROMPT = `You are a B2B software complaint analyst. This complaint is about {product_name}. Extract the pain details from this review/complaint.
+
+REVIEW TEXT:
+{text}
+
+SOURCE: {source} ({url})
+KNOWN PRODUCT: {product_name}
+
+Respond with ONLY valid JSON (no markdown, no backticks):
+{
+  "pain_categories": ["array of categories from: pricing, ux, support, reliability, features, onboarding, mobile, contracts, integrations, scaling"],
+  "pain_summary": "one sentence summary of the core complaint",
+  "severity": 7,
+  "wishes": "what the user wishes existed instead (or null)",
+  "specific_feature_gaps": ["array of specific missing features or improvements needed"],
+  "competitor_mentions": ["other products mentioned positively or as alternatives"],
+  "estimated_monthly_spend": "estimated monthly cost range like '$50-100' or null if unknown",
+  "user_segment": "who is complaining: 'small_business', 'mid_market', 'enterprise', 'freelancer', or null",
+  "switching_intent": "none|considering|actively_looking|already_switched",
+  "is_valid_complaint": true
+}`;
+
 const VALID_PAIN_CATEGORIES: PainCategory[] = [
   "pricing", "ux", "support", "reliability", "features",
   "onboarding", "mobile", "contracts", "integrations", "scaling",
 ];
 
-function parseExtraction(raw: string): AIExtraction | null {
+function parseExtraction(raw: string, preLinkedProductName?: string): AIExtraction | null {
   try {
     let json = raw.trim();
     if (json.startsWith("```")) {
@@ -53,7 +75,7 @@ function parseExtraction(raw: string): AIExtraction | null {
     );
 
     return {
-      product_name: parsed.product_name || null,
+      product_name: preLinkedProductName || parsed.product_name || null,
       product_category: parsed.product_category || null,
       pain_categories: validCategories,
       pain_summary: parsed.pain_summary || "",
@@ -74,13 +96,24 @@ function parseExtraction(raw: string): AIExtraction | null {
 async function analyzeComplaint(
   text: string,
   source: string,
-  url: string
+  url: string,
+  preLinkedProductName?: string
 ): Promise<AIExtraction | null> {
   const groq = getGroqClient();
-  const prompt = EXTRACTION_PROMPT
-    .replace("{text}", text.substring(0, 2000))
-    .replace("{source}", source)
-    .replace("{url}", url || "");
+
+  let prompt: string;
+  if (preLinkedProductName) {
+    prompt = PRELINKED_EXTRACTION_PROMPT
+      .replace(/{product_name}/g, preLinkedProductName)
+      .replace("{text}", text.substring(0, 2000))
+      .replace("{source}", source)
+      .replace("{url}", url || "");
+  } else {
+    prompt = EXTRACTION_PROMPT
+      .replace("{text}", text.substring(0, 2000))
+      .replace("{source}", source)
+      .replace("{url}", url || "");
+  }
 
   try {
     const response = await groq.chat.completions.create({
@@ -93,7 +126,7 @@ async function analyzeComplaint(
 
     const content = response.choices[0]?.message?.content;
     if (!content) return null;
-    return parseExtraction(content);
+    return parseExtraction(content, preLinkedProductName);
   } catch (error: unknown) {
     if (error && typeof error === "object" && "status" in error && error.status === 429) {
       throw error; // Re-throw rate limits
@@ -107,12 +140,11 @@ export async function runStage2(options?: { maxItems?: number }) {
   const limit = options?.maxItems || MAX_PER_RUN;
   const supabase = createServerClient();
 
-  // Fetch unanalyzed complaints
+  // Fetch ALL unanalyzed complaints (both pre-linked and unlinked)
   const { data: complaints, error } = await supabase
     .from("complaints")
     .select("*")
     .eq("analyzed", false)
-    .is("product_id", null)
     .order("collected_at", { ascending: true })
     .limit(limit * 3); // Fetch extra since many will be filtered
 
@@ -131,7 +163,8 @@ export async function runStage2(options?: { maxItems?: number }) {
 
   console.log(`  Passed pre-filter: ${filtered.length}`);
   const toAnalyze = filtered.slice(0, limit);
-  console.log(`  Analyzing: ${toAnalyze.length}`);
+  const preLinkedCount = toAnalyze.filter((c) => c.product_id).length;
+  console.log(`  Analyzing: ${toAnalyze.length} (${preLinkedCount} pre-linked)`);
 
   // Mark filtered-out complaints as analyzed (no product) so we don't reprocess
   const filteredOutIds = complaints
@@ -146,24 +179,44 @@ export async function runStage2(options?: { maxItems?: number }) {
     console.log(`  Marked ${filteredOutIds.length} filtered-out as analyzed`);
   }
 
+  // Cache product names for pre-linked complaints
+  const productNameCache = new Map<string, string>();
+  const productIdsToFetch = [
+    ...new Set(toAnalyze.filter((c) => c.product_id).map((c) => c.product_id)),
+  ];
+  if (productIdsToFetch.length > 0) {
+    const { data: products } = await supabase
+      .from("products")
+      .select("id, name")
+      .in("id", productIdsToFetch);
+    for (const p of products || []) {
+      productNameCache.set(p.id, p.name);
+    }
+  }
+
   let analyzed = 0;
   let linked = 0;
   let quotaHit = false;
 
   for (const complaint of toAnalyze) {
     const text = `${complaint.title || ""}\n${complaint.raw_text}`;
+    const isPreLinked = !!complaint.product_id;
+    const preLinkedProductName = isPreLinked
+      ? productNameCache.get(complaint.product_id) || undefined
+      : undefined;
 
     try {
       const extraction = await analyzeComplaint(
         text,
         complaint.source,
-        complaint.source_url
+        complaint.source_url,
+        preLinkedProductName
       );
 
       analyzed++;
 
-      if (!extraction || !extraction.product_name) {
-        // Valid complaint but no clear product — mark as analyzed
+      if (!extraction) {
+        // Not a valid complaint — mark as analyzed
         await supabase
           .from("complaints")
           .update({ analyzed: true })
@@ -171,33 +224,63 @@ export async function runStage2(options?: { maxItems?: number }) {
         continue;
       }
 
-      // Find or create the product
-      const product = await findOrCreateProduct(
-        extraction.product_name,
-        extraction.product_category || undefined
-      );
+      if (isPreLinked) {
+        // Already linked to product — just update pain details
+        await supabase
+          .from("complaints")
+          .update({
+            pain_categories: extraction.pain_categories,
+            pain_summary: extraction.pain_summary,
+            severity: extraction.severity,
+            wishes: extraction.wishes,
+            specific_feature_gaps: extraction.specific_feature_gaps,
+            competitor_mentions: extraction.competitor_mentions,
+            switching_intent: extraction.switching_intent,
+            user_segment: extraction.user_segment,
+            analyzed: true,
+          })
+          .eq("id", complaint.id);
 
-      // Update complaint with extraction data + link to product
-      await supabase
-        .from("complaints")
-        .update({
-          product_id: product.id,
-          pain_categories: extraction.pain_categories,
-          pain_summary: extraction.pain_summary,
-          severity: extraction.severity,
-          wishes: extraction.wishes,
-          specific_feature_gaps: extraction.specific_feature_gaps,
-          competitor_mentions: extraction.competitor_mentions,
-          switching_intent: extraction.switching_intent,
-          user_segment: extraction.user_segment,
-          analyzed: true,
-        })
-        .eq("id", complaint.id);
+        linked++;
+        console.log(
+          `  [${analyzed}/${toAnalyze.length}] ${preLinkedProductName} (pre-linked) — ${extraction.pain_summary?.substring(0, 60)}`
+        );
+      } else {
+        // Not pre-linked — need to resolve product from AI extraction
+        if (!extraction.product_name) {
+          await supabase
+            .from("complaints")
+            .update({ analyzed: true })
+            .eq("id", complaint.id);
+          continue;
+        }
 
-      linked++;
-      console.log(
-        `  [${analyzed}/${toAnalyze.length}] ${extraction.product_name} — ${extraction.pain_summary?.substring(0, 60)}`
-      );
+        const product = await findOrCreateProduct(
+          extraction.product_name,
+          extraction.product_category || undefined
+        );
+
+        await supabase
+          .from("complaints")
+          .update({
+            product_id: product.id,
+            pain_categories: extraction.pain_categories,
+            pain_summary: extraction.pain_summary,
+            severity: extraction.severity,
+            wishes: extraction.wishes,
+            specific_feature_gaps: extraction.specific_feature_gaps,
+            competitor_mentions: extraction.competitor_mentions,
+            switching_intent: extraction.switching_intent,
+            user_segment: extraction.user_segment,
+            analyzed: true,
+          })
+          .eq("id", complaint.id);
+
+        linked++;
+        console.log(
+          `  [${analyzed}/${toAnalyze.length}] ${extraction.product_name} — ${extraction.pain_summary?.substring(0, 60)}`
+        );
+      }
     } catch (error: unknown) {
       if (error && typeof error === "object" && "status" in error && error.status === 429) {
         console.log("  Groq rate limit hit, stopping.");

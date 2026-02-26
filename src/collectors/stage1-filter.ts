@@ -22,8 +22,11 @@ const NOISE_PATTERNS = [
   /use my (referral|link|code)/i,
   /discount code/i,
   /\b(sponsored|paid partnership)\b/i,
-  /\b(hiring|we're looking|job opening)\b/i,
-  /check out my|i built|i created|just launched/i,
+  /\b(hiring|we're looking|job opening|job post|now hiring|open position)\b/i,
+  /check out my|i built|i created|just launched|i made|my startup|my saas/i,
+  /\b(apply now|resume|cover letter|interview)\b/i,
+  /\bshowcase\b.*\b(project|app|tool)\b/i,
+  /\b(subscribe|follow me|my channel|my blog|my newsletter)\b/i,
 ];
 
 export function passesPreFilter(text: string): { passes: boolean; signalCount: number } {
@@ -39,7 +42,7 @@ export function passesPreFilter(text: string): { passes: boolean; signalCount: n
     if (lowerText.includes(signal)) signalCount++;
   }
 
-  return { passes: signalCount >= 1, signalCount };
+  return { passes: signalCount >= 2, signalCount };
 }
 
 // Standalone: log filter stats for unanalyzed complaints
