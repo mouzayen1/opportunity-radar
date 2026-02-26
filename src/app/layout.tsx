@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Navigation } from "@/components/Navigation";
 
 export const metadata: Metadata = {
   title: "PainRadar — B2B Software Displeasure Discovery",
@@ -14,7 +15,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="min-h-screen antialiased">{children}</body>
+      <body className="min-h-screen antialiased">
+        <Navigation />
+        {children}
+      </body>
     </html>
   );
 }
