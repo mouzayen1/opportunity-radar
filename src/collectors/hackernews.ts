@@ -84,14 +84,20 @@ async function getSearchTermsFromDB(): Promise<string[]> {
   return data.flatMap((row) => row.hn_search_terms || []);
 }
 
-export async function collectFromHackerNews(): Promise<RawComplaint[]> {
+export async function collectFromHackerNews(options?: { maxQueries?: number; skipCategoryTerms?: boolean }): Promise<RawComplaint[]> {
   console.log("Collecting from Hacker News...");
   const allItems = new Map<string, RawComplaint>();
 
-  // Get category-specific search terms from DB
-  const categoryTerms = await getSearchTermsFromDB();
-  const allQueries = [...COMPLAINT_QUERIES, ...categoryTerms];
-  const uniqueQueries = [...new Set(allQueries)];
+  let uniqueQueries: string[];
+  if (options?.skipCategoryTerms) {
+    uniqueQueries = [...COMPLAINT_QUERIES];
+  } else {
+    const categoryTerms = await getSearchTermsFromDB();
+    uniqueQueries = [...new Set([...COMPLAINT_QUERIES, ...categoryTerms])];
+  }
+  if (options?.maxQueries) {
+    uniqueQueries = uniqueQueries.slice(0, options.maxQueries);
+  }
 
   for (const query of uniqueQueries) {
     console.log(`  Searching HN for: "${query}"`);

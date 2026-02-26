@@ -18,24 +18,30 @@ async function saveComplaints(items: RawComplaint[], source: string) {
     .select("id")
     .single();
 
+  // Batch insert in chunks of 50 for speed
   let newCount = 0;
-  for (const item of items) {
-    const { error } = await supabase.from("complaints").upsert(
-      {
-        source: item.source,
-        source_id: item.source_id,
-        source_url: item.source_url,
-        title: item.title,
-        raw_text: (item.raw_text || "").substring(0, 2000),
-        author: item.author,
-        review_date: item.review_date instanceof Date
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE).map((item) => ({
+      source: item.source,
+      source_id: item.source_id,
+      source_url: item.source_url,
+      title: item.title,
+      raw_text: (item.raw_text || "").substring(0, 2000),
+      author: item.author,
+      review_date:
+        item.review_date instanceof Date
           ? item.review_date.toISOString()
           : item.review_date,
-        analyzed: false,
-      },
-      { onConflict: "source,source_id", ignoreDuplicates: true }
-    );
-    if (!error) newCount++;
+      analyzed: false,
+    }));
+
+    const { data } = await supabase
+      .from("complaints")
+      .upsert(batch, { onConflict: "source,source_id", ignoreDuplicates: true })
+      .select("id");
+
+    newCount += data?.length || 0;
   }
 
   if (run?.id) {
@@ -60,7 +66,11 @@ export async function POST(request: NextRequest) {
   try {
     switch (stage) {
       case "hn": {
-        const items = await collectFromHackerNews();
+        // Limit to 5 queries, skip slow category term lookups
+        const items = await collectFromHackerNews({
+          maxQueries: 5,
+          skipCategoryTerms: true,
+        });
         const result = await saveComplaints(items, "hackernews");
         return NextResponse.json({
           success: true,
@@ -70,8 +80,11 @@ export async function POST(request: NextRequest) {
       }
 
       case "reddit": {
-        // Limit to 8 subreddits and 3 queries to fit within 60s timeout
-        const items = await collectFromReddit({ maxSubreddits: 8, maxQueries: 3 });
+        // Limit to 5 subreddits and 3 queries to fit within 60s
+        const items = await collectFromReddit({
+          maxSubreddits: 5,
+          maxQueries: 3,
+        });
         const result = await saveComplaints(items, "reddit");
         return NextResponse.json({
           success: true,
