@@ -2,22 +2,14 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 import { createServerClient } from "../lib/supabase";
 import { RawComplaint } from "../lib/types";
+import {
+  getAllProductConfigs,
+  ProductSearchConfig,
+  validateProductMention,
+} from "../lib/product-config";
 import { sleep } from "../lib/utils";
 
 const ALGOLIA_BASE = "https://hn.algolia.com/api/v1";
-
-// Complaint qualifiers appended to product name searches
-const COMPLAINT_SUFFIXES = [
-  "",              // bare product name
-  "alternative",   // people looking for alternatives
-  "frustrated",    // frustration signals
-  "problems",      // problem signals
-  "terrible",      // strong negative
-  "switched from", // switching signals
-];
-
-// Generic terms to skip — only search for actual product names
-const GENERIC_TERM_PATTERNS = /\b(software|tool|system|platform|alternative|management|solution)\b/i;
 
 interface AlgoliaHit {
   objectID: string;
@@ -53,18 +45,10 @@ async function searchHN(
   }
 }
 
-function textMentionsProduct(text: string, productName: string): boolean {
-  return text.toLowerCase().includes(productName.toLowerCase());
-}
-
 function hitToComplaint(hit: AlgoliaHit, targetProduct: string): RawComplaint | null {
   const text = hit.comment_text || hit.story_text || "";
   const title = hit.title || hit.story_title || null;
   if (!text && !title) return null;
-
-  // Verify the product name actually appears in the content
-  const fullText = `${title || ""} ${text}`;
-  if (!textMentionsProduct(fullText, targetProduct)) return null;
 
   return {
     source: "hackernews",
@@ -81,71 +65,101 @@ function hitToComplaint(hit: AlgoliaHit, targetProduct: string): RawComplaint | 
   };
 }
 
-async function getProductTermsFromDB(): Promise<string[]> {
-  const supabase = createServerClient();
-  const { data } = await supabase
-    .from("monitored_categories")
-    .select("hn_search_terms")
-    .eq("is_active", true)
-    .order("priority", { ascending: false });
+/**
+ * Build search queries based on product ambiguity tier.
+ * SAFE: search the name directly + complaint suffixes
+ * RISKY: search the name + a few context anchors
+ * DANGEROUS: ONLY search unambiguous forms (never the bare name)
+ */
+function getSearchQueries(config: ProductSearchConfig): string[] {
+  const queries: string[] = [];
 
-  if (!data) return [];
-  const allTerms = data.flatMap((row) => row.hn_search_terms || []);
-  // Only keep actual product names, skip generic terms
-  const productNames = [...new Set(allTerms)].filter(
-    (t) => !GENERIC_TERM_PATTERNS.test(t)
-  );
-  return productNames;
-}
-
-export async function collectFromHackerNews(options?: { maxProducts?: number }): Promise<RawComplaint[]> {
-  console.log("Collecting from Hacker News (product-centric)...");
-  const allItems = new Map<string, RawComplaint>();
-
-  let productTerms = await getProductTermsFromDB();
-  if (options?.maxProducts) {
-    productTerms = productTerms.slice(0, options.maxProducts);
+  if (config.ambiguity_tier === "safe") {
+    // Safe names can be searched directly
+    queries.push(config.canonical_name);
+    queries.push(`${config.canonical_name} alternative`);
+    queries.push(`${config.canonical_name} problems`);
+    queries.push(`${config.canonical_name} frustrated`);
+  } else if (config.ambiguity_tier === "risky") {
+    // Risky names: search with a few key context anchors
+    queries.push(config.canonical_name);
+    for (const form of config.unambiguous_forms.slice(0, 2)) {
+      queries.push(form);
+    }
+  } else {
+    // Dangerous names: ONLY search unambiguous forms
+    for (const form of config.unambiguous_forms) {
+      queries.push(form);
+    }
   }
 
-  console.log(`  Searching for ${productTerms.length} products: ${productTerms.join(", ")}`);
+  return queries;
+}
 
-  for (const productName of productTerms) {
+export async function collectFromHackerNews(options?: {
+  maxProducts?: number;
+}): Promise<RawComplaint[]> {
+  console.log("Collecting from Hacker News (5-layer defense)...");
+  const allItems = new Map<string, RawComplaint>();
+
+  let configs = getAllProductConfigs();
+  if (options?.maxProducts) {
+    configs = configs.slice(0, options.maxProducts);
+  }
+
+  console.log(`  Searching for ${configs.length} products`);
+
+  for (const config of configs) {
     let productHits = 0;
+    let filtered = 0;
+    const queries = getSearchQueries(config);
 
-    // Search with complaint qualifiers to get complaint-focused results
-    for (const suffix of COMPLAINT_SUFFIXES) {
-      const query = suffix ? `${productName} ${suffix}` : productName;
-
+    for (const query of queries) {
       // Search comments (where most complaints live)
       const comments = await searchHN(query, "comment");
       for (const hit of comments) {
-        const complaint = hitToComplaint(hit, productName);
-        if (complaint && !allItems.has(complaint.source_id)) {
-          allItems.set(complaint.source_id, complaint);
-          productHits++;
+        const complaint = hitToComplaint(hit, config.canonical_name);
+        if (!complaint || allItems.has(complaint.source_id)) continue;
+
+        // Layer 3: Pre-AI text validation
+        const fullText = `${complaint.title || ""} ${complaint.raw_text}`;
+        const validation = validateProductMention(fullText, config);
+        if (!validation.valid) {
+          filtered++;
+          continue;
         }
+
+        allItems.set(complaint.source_id, complaint);
+        productHits++;
       }
 
-      // Also search stories for the bare product name only
-      if (!suffix) {
+      // Also search stories for safe/risky products (first query only)
+      if (config.ambiguity_tier !== "dangerous" && query === queries[0]) {
         const stories = await searchHN(query, "story");
         for (const hit of stories) {
-          const complaint = hitToComplaint(hit, productName);
-          if (complaint && !allItems.has(complaint.source_id)) {
-            allItems.set(complaint.source_id, complaint);
-            productHits++;
+          const complaint = hitToComplaint(hit, config.canonical_name);
+          if (!complaint || allItems.has(complaint.source_id)) continue;
+
+          const fullText = `${complaint.title || ""} ${complaint.raw_text}`;
+          const validation = validateProductMention(fullText, config);
+          if (!validation.valid) {
+            filtered++;
+            continue;
           }
+
+          allItems.set(complaint.source_id, complaint);
+          productHits++;
         }
       }
 
       await sleep(100);
     }
 
-    console.log(`  ${productName}: ${productHits} verified items`);
+    console.log(`  ${config.canonical_name} (${config.ambiguity_tier}): ${productHits} kept, ${filtered} filtered`);
   }
 
   const items = Array.from(allItems.values());
-  console.log(`  Found ${items.length} unique HN items across ${productTerms.length} products`);
+  console.log(`  Total: ${items.length} unique HN items`);
   return items;
 }
 

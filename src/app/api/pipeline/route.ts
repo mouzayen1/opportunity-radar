@@ -6,16 +6,10 @@ import { runStage3 } from "@/collectors/stage3-score";
 import { createServerClient } from "@/lib/supabase";
 import { findOrCreateProduct } from "@/lib/normalize";
 import { RawComplaint } from "@/lib/types";
+import { getProductConfig } from "@/lib/product-config";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
-
-// Generic terms that should NOT be pre-linked as product names
-const GENERIC_TERM_PATTERNS = /\b(software|tool|system|platform|alternative|management|solution)\b/i;
-
-function isLikelyProductName(term: string): boolean {
-  return !GENERIC_TERM_PATTERNS.test(term);
-}
 
 async function saveComplaints(items: RawComplaint[], source: string) {
   const supabase = createServerClient();
@@ -30,14 +24,16 @@ async function saveComplaints(items: RawComplaint[], source: string) {
   const productIdCache = new Map<string, string>();
   const termsToResolve = new Set<string>();
   for (const item of items) {
-    if (item.target_product && isLikelyProductName(item.target_product)) {
+    if (item.target_product) {
       termsToResolve.add(item.target_product);
     }
   }
 
   for (const term of termsToResolve) {
     try {
-      const product = await findOrCreateProduct(term);
+      const config = getProductConfig(term);
+      const category = config?.category;
+      const product = await findOrCreateProduct(term, category);
       productIdCache.set(term, product.id);
     } catch (err) {
       console.error(`  Failed to resolve product for "${term}":`, err);
@@ -104,7 +100,7 @@ export async function POST(request: NextRequest) {
     switch (stage) {
       case "hn": {
         const items = await collectFromHackerNews({
-          maxProducts: 10,
+          maxProducts: 25,
         });
         const result = await saveComplaints(items, "hackernews");
         return NextResponse.json({
@@ -116,7 +112,7 @@ export async function POST(request: NextRequest) {
 
       case "reddit": {
         const items = await collectFromReddit({
-          maxProducts: 5,
+          maxProducts: 25,
         });
         const result = await saveComplaints(items, "reddit");
         return NextResponse.json({
@@ -127,7 +123,7 @@ export async function POST(request: NextRequest) {
       }
 
       case "extract": {
-        const result = await runStage2({ maxItems: 15 });
+        const result = await runStage2({ maxItems: 10 });
         return NextResponse.json({
           success: true,
           stage: "AI Extraction",
