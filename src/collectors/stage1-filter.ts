@@ -95,4 +95,6 @@ async function main() {
   console.log(`  Filtered out: ${failed}`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
