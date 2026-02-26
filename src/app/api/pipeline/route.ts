@@ -1,84 +1,112 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { collectFromHackerNews } from "@/collectors/hackernews";
 import { collectFromReddit } from "@/collectors/reddit";
 import { runStage2 } from "@/collectors/stage2-extract";
 import { runStage3 } from "@/collectors/stage3-score";
 import { createServerClient } from "@/lib/supabase";
+import { RawComplaint } from "@/lib/types";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+async function saveComplaints(items: RawComplaint[], source: string) {
   const supabase = createServerClient();
-  const steps: { step: string; result: string }[] = [];
+
+  const { data: run } = await supabase
+    .from("collection_runs")
+    .insert({ source, status: "running" })
+    .select("id")
+    .single();
+
+  let newCount = 0;
+  for (const item of items) {
+    const { error } = await supabase.from("complaints").upsert(
+      {
+        source: item.source,
+        source_id: item.source_id,
+        source_url: item.source_url,
+        title: item.title,
+        raw_text: (item.raw_text || "").substring(0, 2000),
+        author: item.author,
+        review_date: item.review_date instanceof Date
+          ? item.review_date.toISOString()
+          : item.review_date,
+        analyzed: false,
+      },
+      { onConflict: "source,source_id", ignoreDuplicates: true }
+    );
+    if (!error) newCount++;
+  }
+
+  if (run?.id) {
+    await supabase
+      .from("collection_runs")
+      .update({
+        status: "completed",
+        items_found: items.length,
+        items_new: newCount,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", run.id);
+  }
+
+  return { found: items.length, saved: newCount };
+}
+
+export async function POST(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const stage = searchParams.get("stage") || "all";
 
   try {
-    // Record collection run
-    const { data: run } = await supabase
-      .from("collection_runs")
-      .insert({ source: "manual", status: "running" })
-      .select("id")
-      .single();
+    switch (stage) {
+      case "hn": {
+        const items = await collectFromHackerNews();
+        const result = await saveComplaints(items, "hackernews");
+        return NextResponse.json({
+          success: true,
+          stage: "HackerNews Collection",
+          result: `${result.found} found, ${result.saved} new`,
+        });
+      }
 
-    // Stage 1a: Collect from HackerNews
-    let hnCount = 0;
-    try {
-      const hnComplaints = await collectFromHackerNews();
-      hnCount = hnComplaints.length;
-      steps.push({ step: "HackerNews", result: `${hnCount} complaints collected` });
-    } catch (err: any) {
-      steps.push({ step: "HackerNews", result: `Error: ${err.message}` });
+      case "reddit": {
+        // Limit to 8 subreddits and 3 queries to fit within 60s timeout
+        const items = await collectFromReddit({ maxSubreddits: 8, maxQueries: 3 });
+        const result = await saveComplaints(items, "reddit");
+        return NextResponse.json({
+          success: true,
+          stage: "Reddit Collection",
+          result: `${result.found} found, ${result.saved} new`,
+        });
+      }
+
+      case "extract": {
+        const result = await runStage2();
+        return NextResponse.json({
+          success: true,
+          stage: "AI Extraction",
+          result: `${result.analyzed} analyzed, ${result.linked} linked`,
+        });
+      }
+
+      case "score": {
+        const result = await runStage3();
+        return NextResponse.json({
+          success: true,
+          stage: "Scoring",
+          result: `${result.scored} products scored`,
+        });
+      }
+
+      default:
+        return NextResponse.json(
+          { success: false, error: "Use ?stage=hn|reddit|extract|score" },
+          { status: 400 }
+        );
     }
-
-    // Stage 1b: Collect from Reddit
-    let redditCount = 0;
-    try {
-      const redditComplaints = await collectFromReddit();
-      redditCount = redditComplaints.length;
-      steps.push({ step: "Reddit", result: `${redditCount} complaints collected` });
-    } catch (err: any) {
-      steps.push({ step: "Reddit", result: `Error: ${err.message}` });
-    }
-
-    // Stage 2: AI extraction
-    try {
-      const stage2 = await runStage2();
-      steps.push({
-        step: "AI Extraction",
-        result: `${stage2.analyzed} analyzed, ${stage2.linked} linked to products`,
-      });
-    } catch (err: any) {
-      steps.push({ step: "AI Extraction", result: `Error: ${err.message}` });
-    }
-
-    // Stage 3: Scoring
-    try {
-      const stage3 = await runStage3();
-      steps.push({
-        step: "Scoring",
-        result: `${stage3.scored} products scored`,
-      });
-    } catch (err: any) {
-      steps.push({ step: "Scoring", result: `Error: ${err.message}` });
-    }
-
-    // Update collection run
-    if (run?.id) {
-      await supabase
-        .from("collection_runs")
-        .update({
-          status: "completed",
-          items_found: hnCount + redditCount,
-          items_new: hnCount + redditCount,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", run.id);
-    }
-
-    return NextResponse.json({ success: true, steps });
   } catch (err: any) {
     return NextResponse.json(
-      { success: false, error: err.message, steps },
+      { success: false, stage, error: err.message },
       { status: 500 }
     );
   }

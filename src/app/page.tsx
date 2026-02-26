@@ -39,7 +39,8 @@ export default function Home() {
     sortBy: "pain_score",
   });
   const [pipelineRunning, setPipelineRunning] = useState(false);
-  const [pipelineResult, setPipelineResult] = useState<{ steps: { step: string; result: string }[] } | null>(null);
+  const [pipelineStage, setPipelineStage] = useState("");
+  const [pipelineSteps, setPipelineSteps] = useState<{ step: string; result: string }[]>([]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -99,19 +100,37 @@ export default function Home() {
 
   const runPipeline = async () => {
     setPipelineRunning(true);
-    setPipelineResult(null);
-    try {
-      const res = await fetch("/api/pipeline", { method: "POST" });
-      const data = await res.json();
-      setPipelineResult(data);
-      // Refresh data after pipeline completes
-      fetchStats();
-      fetchProducts();
-    } catch {
-      setPipelineResult({ steps: [{ step: "Pipeline", result: "Failed to run" }] });
-    } finally {
-      setPipelineRunning(false);
+    setPipelineSteps([]);
+
+    const stages = [
+      { id: "hn", label: "Collecting from HackerNews..." },
+      { id: "reddit", label: "Collecting from Reddit..." },
+      { id: "extract", label: "Running AI extraction..." },
+      { id: "score", label: "Scoring products..." },
+    ];
+
+    for (const stage of stages) {
+      setPipelineStage(stage.label);
+      try {
+        const res = await fetch(`/api/pipeline?stage=${stage.id}`, { method: "POST" });
+        const data = await res.json();
+        setPipelineSteps((prev) => [...prev, {
+          step: data.stage || stage.id,
+          result: data.success ? data.result : `Error: ${data.error}`,
+        }]);
+      } catch {
+        setPipelineSteps((prev) => [...prev, {
+          step: stage.id,
+          result: "Request failed",
+        }]);
+      }
     }
+
+    setPipelineStage("");
+    setPipelineRunning(false);
+    // Refresh data
+    fetchStats();
+    fetchProducts();
   };
 
   const totalPages = Math.ceil(total / (filters.pageSize || 20));
@@ -142,27 +161,38 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Pipeline result */}
-        {pipelineResult && (
+        {/* Pipeline progress */}
+        {(pipelineRunning || pipelineSteps.length > 0) && (
           <div className="mb-6 rounded-lg border border-border bg-card p-4">
             <div className="mb-2 flex items-center gap-2">
-              <CheckCircle2 size={16} className="text-green-500" />
-              <span className="text-sm font-medium text-foreground">Pipeline Complete</span>
-              <button
-                onClick={() => setPipelineResult(null)}
-                className="ml-auto text-xs text-muted-foreground hover:text-foreground"
-              >
-                Dismiss
-              </button>
+              {pipelineRunning ? (
+                <Loader2 size={16} className="animate-spin text-primary" />
+              ) : (
+                <CheckCircle2 size={16} className="text-green-500" />
+              )}
+              <span className="text-sm font-medium text-foreground">
+                {pipelineRunning ? pipelineStage : "Pipeline Complete"}
+              </span>
+              {!pipelineRunning && (
+                <button
+                  onClick={() => setPipelineSteps([])}
+                  className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Dismiss
+                </button>
+              )}
             </div>
-            <div className="space-y-1">
-              {pipelineResult.steps.map((s, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{s.step}:</span>
-                  <span>{s.result}</span>
-                </div>
-              ))}
-            </div>
+            {pipelineSteps.length > 0 && (
+              <div className="space-y-1">
+                {pipelineSteps.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <CheckCircle2 size={12} className="text-green-500 shrink-0" />
+                    <span className="font-medium text-foreground">{s.step}:</span>
+                    <span>{s.result}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

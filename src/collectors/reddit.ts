@@ -85,17 +85,21 @@ async function getSubredditsFromDB(): Promise<string[]> {
   return [...new Set(all)];
 }
 
-export async function collectFromReddit(): Promise<RawComplaint[]> {
+export async function collectFromReddit(options?: { maxSubreddits?: number; maxQueries?: number }): Promise<RawComplaint[]> {
   console.log("Collecting from Reddit...");
   const allPosts = new Map<string, RawComplaint>();
 
-  const subreddits = await getSubredditsFromDB();
-  console.log(`  Scanning ${subreddits.length} subreddits`);
+  let subreddits = await getSubredditsFromDB();
+  if (options?.maxSubreddits) {
+    subreddits = subreddits.slice(0, options.maxSubreddits);
+  }
+  const queries = options?.maxQueries ? COMPLAINT_QUERIES.slice(0, options.maxQueries) : COMPLAINT_QUERIES;
+  console.log(`  Scanning ${subreddits.length} subreddits with ${queries.length} queries`);
 
   for (const subreddit of subreddits) {
     console.log(`  Searching r/${subreddit}...`);
 
-    for (const query of COMPLAINT_QUERIES) {
+    for (const query of queries) {
       const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${encodeURIComponent(query)}&restrict_sr=on&sort=new&t=month&limit=50`;
       const data = await fetchWithRetry(url);
 
