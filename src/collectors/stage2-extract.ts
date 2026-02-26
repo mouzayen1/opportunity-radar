@@ -115,25 +115,35 @@ async function analyzeComplaint(
       .replace("{url}", url || "");
   }
 
-  try {
-    const response = await groq.chat.completions.create({
-      model: GROQ_MODEL,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.1,
-      max_tokens: 500,
-      response_format: { type: "json_object" },
-    });
+  // Retry with backoff on rate limits (Groq free tier is aggressive)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await groq.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.1,
+        max_tokens: 500,
+        response_format: { type: "json_object" },
+      });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) return null;
-    return parseExtraction(content, preLinkedProductName);
-  } catch (error: unknown) {
-    if (error && typeof error === "object" && "status" in error && error.status === 429) {
-      throw error; // Re-throw rate limits
+      const content = response.choices[0]?.message?.content;
+      if (!content) return null;
+      return parseExtraction(content, preLinkedProductName);
+    } catch (error: unknown) {
+      if (error && typeof error === "object" && "status" in error && error.status === 429) {
+        if (attempt < 2) {
+          const waitMs = (attempt + 1) * 5000; // 5s, 10s
+          console.log(`  Rate limited, waiting ${waitMs / 1000}s (attempt ${attempt + 1}/3)...`);
+          await sleep(waitMs);
+          continue;
+        }
+        throw error; // Give up after 3 attempts
+      }
+      console.error("  Groq API error:", error);
+      return null;
     }
-    console.error("  Groq API error:", error);
-    return null;
   }
+  return null;
 }
 
 export async function runStage2(options?: { maxItems?: number }) {
@@ -295,7 +305,7 @@ export async function runStage2(options?: { maxItems?: number }) {
         .eq("id", complaint.id);
     }
 
-    await sleep(200);
+    await sleep(1000); // 1s between calls to respect Groq free tier limits
   }
 
   console.log(`\nStage 2 complete: ${analyzed} analyzed, ${linked} linked to products`);
