@@ -132,17 +132,21 @@ export async function POST(request: NextRequest) {
         let totalAnalyzed = 0;
         let totalLinked = 0;
         let batches = 0;
-        while (Date.now() - startTime < 45_000) { // stop at 45s to leave margin
+        let hitQuota = false;
+        while (Date.now() - startTime < 40_000) { // stop at 40s to leave margin
           const result = await runStage2({ maxItems: 20 });
           totalAnalyzed += result.analyzed;
           totalLinked += result.linked;
           batches++;
-          if (result.analyzed === 0) break; // nothing left to process
+          if (result.analyzed === 0 || result.quotaHit) {
+            hitQuota = !!result.quotaHit;
+            break;
+          }
         }
         return NextResponse.json({
           success: true,
           stage: "AI Extraction",
-          result: `${totalAnalyzed} analyzed, ${totalLinked} linked (${batches} batches)`,
+          result: `${totalAnalyzed} analyzed, ${totalLinked} linked (${batches} batches)${hitQuota ? " — rate limited" : ""}`,
         });
       }
 

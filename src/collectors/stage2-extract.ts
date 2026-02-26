@@ -115,7 +115,7 @@ async function analyzeComplaint(
       .replace("{url}", url || "");
   }
 
-  // Retry with backoff on rate limits (Groq free tier is aggressive)
+  // Retry with short backoff on rate limits
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const response = await groq.chat.completions.create({
@@ -132,7 +132,7 @@ async function analyzeComplaint(
     } catch (error: unknown) {
       if (error && typeof error === "object" && "status" in error && error.status === 429) {
         if (attempt < 2) {
-          const waitMs = (attempt + 1) * 5000; // 5s, 10s
+          const waitMs = (attempt + 1) * 2000; // 2s, 4s
           console.log(`  Rate limited, waiting ${waitMs / 1000}s (attempt ${attempt + 1}/3)...`);
           await sleep(waitMs);
           continue;
@@ -310,7 +310,7 @@ export async function runStage2(options?: { maxItems?: number }) {
 
   console.log(`\nStage 2 complete: ${analyzed} analyzed, ${linked} linked to products`);
   if (quotaHit) console.log("  (stopped early due to rate limit)");
-  return { analyzed, linked };
+  return { analyzed, linked, quotaHit };
 }
 
 // Allow running as standalone script
