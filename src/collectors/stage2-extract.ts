@@ -172,11 +172,12 @@ export async function runStage2(options?: { maxItems?: number }) {
     .map((c) => c.id);
 
   if (filteredOutIds.length > 0) {
+    // Clear product_id on filtered-out complaints so they don't inflate product counts
     await supabase
       .from("complaints")
-      .update({ analyzed: true })
+      .update({ analyzed: true, product_id: null })
       .in("id", filteredOutIds);
-    console.log(`  Marked ${filteredOutIds.length} filtered-out as analyzed`);
+    console.log(`  Marked ${filteredOutIds.length} filtered-out as analyzed (cleared product_id)`);
   }
 
   // Cache product names for pre-linked complaints

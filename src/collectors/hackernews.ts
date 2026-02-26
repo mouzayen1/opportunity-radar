@@ -53,10 +53,18 @@ async function searchHN(
   }
 }
 
+function textMentionsProduct(text: string, productName: string): boolean {
+  return text.toLowerCase().includes(productName.toLowerCase());
+}
+
 function hitToComplaint(hit: AlgoliaHit, targetProduct: string): RawComplaint | null {
   const text = hit.comment_text || hit.story_text || "";
   const title = hit.title || hit.story_title || null;
   if (!text && !title) return null;
+
+  // Verify the product name actually appears in the content
+  const fullText = `${title || ""} ${text}`;
+  if (!textMentionsProduct(fullText, targetProduct)) return null;
 
   return {
     source: "hackernews",
@@ -102,10 +110,11 @@ export async function collectFromHackerNews(options?: { maxProducts?: number }):
   console.log(`  Searching for ${productTerms.length} products: ${productTerms.join(", ")}`);
 
   for (const productName of productTerms) {
+    let productHits = 0;
+
     // Search with complaint qualifiers to get complaint-focused results
     for (const suffix of COMPLAINT_SUFFIXES) {
       const query = suffix ? `${productName} ${suffix}` : productName;
-      console.log(`  HN: "${query}"`);
 
       // Search comments (where most complaints live)
       const comments = await searchHN(query, "comment");
@@ -113,6 +122,7 @@ export async function collectFromHackerNews(options?: { maxProducts?: number }):
         const complaint = hitToComplaint(hit, productName);
         if (complaint && !allItems.has(complaint.source_id)) {
           allItems.set(complaint.source_id, complaint);
+          productHits++;
         }
       }
 
@@ -123,12 +133,15 @@ export async function collectFromHackerNews(options?: { maxProducts?: number }):
           const complaint = hitToComplaint(hit, productName);
           if (complaint && !allItems.has(complaint.source_id)) {
             allItems.set(complaint.source_id, complaint);
+            productHits++;
           }
         }
       }
 
       await sleep(100);
     }
+
+    console.log(`  ${productName}: ${productHits} verified items`);
   }
 
   const items = Array.from(allItems.values());
