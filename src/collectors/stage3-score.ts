@@ -115,7 +115,7 @@ async function updatePainSummaries(
   }
 }
 
-async function main() {
+export async function runStage3() {
   const supabase = createServerClient();
 
   // Get all products that have complaints
@@ -125,7 +125,7 @@ async function main() {
 
   if (error || !products) {
     console.error("Failed to fetch products:", error?.message);
-    process.exit(1);
+    return { scored: 0 };
   }
 
   console.log(`Stage 3: Scoring ${products.length} products`);
@@ -189,6 +189,10 @@ async function main() {
   }
 
   console.log("\nStage 3 scoring complete.");
+  return { scored: products.length };
 }
 
-main();
+// Allow running as standalone script
+if (require.main === module) {
+  runStage3();
+}

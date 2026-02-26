@@ -103,7 +103,7 @@ async function analyzeComplaint(
   }
 }
 
-async function main() {
+export async function runStage2() {
   const supabase = createServerClient();
 
   // Fetch unanalyzed complaints
@@ -117,7 +117,7 @@ async function main() {
 
   if (error || !complaints) {
     console.error("Failed to fetch complaints:", error?.message);
-    process.exit(1);
+    return { analyzed: 0, linked: 0 };
   }
 
   console.log(`Stage 2: ${complaints.length} unanalyzed complaints`);
@@ -215,6 +215,10 @@ async function main() {
 
   console.log(`\nStage 2 complete: ${analyzed} analyzed, ${linked} linked to products`);
   if (quotaHit) console.log("  (stopped early due to rate limit)");
+  return { analyzed, linked };
 }
 
-main();
+// Allow running as standalone script
+if (require.main === module) {
+  runStage2();
+}

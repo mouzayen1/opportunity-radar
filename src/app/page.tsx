@@ -6,7 +6,7 @@ import { StatsBar } from "@/components/StatsBar";
 import { FilterSidebar } from "@/components/FilterSidebar";
 import { SearchBar } from "@/components/SearchBar";
 import { ProductCard } from "@/components/ProductCard";
-import { ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertCircle, RefreshCw, Play, Loader2, CheckCircle2 } from "lucide-react";
 
 function ProductSkeleton() {
   return (
@@ -38,6 +38,8 @@ export default function Home() {
     pageSize: 20,
     sortBy: "pain_score",
   });
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<{ steps: { step: string; result: string }[] } | null>(null);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -95,6 +97,23 @@ export default function Home() {
     fetchProducts();
   }, [fetchProducts]);
 
+  const runPipeline = async () => {
+    setPipelineRunning(true);
+    setPipelineResult(null);
+    try {
+      const res = await fetch("/api/pipeline", { method: "POST" });
+      const data = await res.json();
+      setPipelineResult(data);
+      // Refresh data after pipeline completes
+      fetchStats();
+      fetchProducts();
+    } catch {
+      setPipelineResult({ steps: [{ step: "Pipeline", result: "Failed to run" }] });
+    } finally {
+      setPipelineRunning(false);
+    }
+  };
+
   const totalPages = Math.ceil(total / (filters.pageSize || 20));
   const currentPage = filters.page || 1;
 
@@ -102,12 +121,50 @@ export default function Home() {
     <main className="min-h-screen bg-background">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            B2B software pain signals ranked by disruption opportunity
-          </p>
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+            <p className="text-sm text-muted-foreground">
+              B2B software pain signals ranked by disruption opportunity
+            </p>
+          </div>
+          <button
+            onClick={runPipeline}
+            disabled={pipelineRunning}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {pipelineRunning ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Play size={16} />
+            )}
+            {pipelineRunning ? "Running..." : "Run Pipeline"}
+          </button>
         </div>
+
+        {/* Pipeline result */}
+        {pipelineResult && (
+          <div className="mb-6 rounded-lg border border-border bg-card p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-green-500" />
+              <span className="text-sm font-medium text-foreground">Pipeline Complete</span>
+              <button
+                onClick={() => setPipelineResult(null)}
+                className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+              >
+                Dismiss
+              </button>
+            </div>
+            <div className="space-y-1">
+              {pipelineResult.steps.map((s, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{s.step}:</span>
+                  <span>{s.result}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Stats */}
         {stats && <StatsBar stats={stats} className="mb-6" />}
