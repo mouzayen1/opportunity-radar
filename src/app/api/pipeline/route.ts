@@ -127,12 +127,22 @@ export async function POST(request: NextRequest) {
       }
 
       case "extract": {
-        // Groq calls are fast (~200ms each), 30 items fits well within 60s timeout
-        const result = await runStage2({ maxItems: 30 });
+        // Loop extract batches until done or approaching 60s timeout
+        const startTime = Date.now();
+        let totalAnalyzed = 0;
+        let totalLinked = 0;
+        let batches = 0;
+        while (Date.now() - startTime < 45_000) { // stop at 45s to leave margin
+          const result = await runStage2({ maxItems: 20 });
+          totalAnalyzed += result.analyzed;
+          totalLinked += result.linked;
+          batches++;
+          if (result.analyzed === 0) break; // nothing left to process
+        }
         return NextResponse.json({
           success: true,
           stage: "AI Extraction",
-          result: `${result.analyzed} analyzed, ${result.linked} linked`,
+          result: `${totalAnalyzed} analyzed, ${totalLinked} linked (${batches} batches)`,
         });
       }
 

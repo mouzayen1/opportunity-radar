@@ -59,10 +59,15 @@ export function passesPreFilter(
     if (lowerText.includes(signal)) signalCount++;
   }
 
-  // Pre-linked complaints (product already known) only need 1 signal
+  // Pre-linked complaints already come from targeted searches with verified
+  // product names — let the AI decide if it's a valid complaint. Only filter
+  // noise patterns and too-short text (handled above).
+  if (options?.preLinked) {
+    return { passes: true, signalCount };
+  }
+
   // Unlinked complaints need 2+ signals for higher confidence
-  const minSignals = options?.preLinked ? 1 : 2;
-  return { passes: signalCount >= minSignals, signalCount };
+  return { passes: signalCount >= 2, signalCount };
 }
 
 // Standalone: log filter stats for unanalyzed complaints
