@@ -115,35 +115,25 @@ async function analyzeComplaint(
       .replace("{url}", url || "");
   }
 
-  // Retry with short backoff on rate limits
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const response = await groq.chat.completions.create({
-        model: GROQ_MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1,
-        max_tokens: 500,
-        response_format: { type: "json_object" },
-      });
+  try {
+    const response = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_tokens: 500,
+      response_format: { type: "json_object" },
+    });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) return null;
-      return parseExtraction(content, preLinkedProductName);
-    } catch (error: unknown) {
-      if (error && typeof error === "object" && "status" in error && error.status === 429) {
-        if (attempt < 2) {
-          const waitMs = (attempt + 1) * 2000; // 2s, 4s
-          console.log(`  Rate limited, waiting ${waitMs / 1000}s (attempt ${attempt + 1}/3)...`);
-          await sleep(waitMs);
-          continue;
-        }
-        throw error; // Give up after 3 attempts
-      }
-      console.error("  Groq API error:", error);
-      return null;
+    const content = response.choices[0]?.message?.content;
+    if (!content) return null;
+    return parseExtraction(content, preLinkedProductName);
+  } catch (error: unknown) {
+    if (error && typeof error === "object" && "status" in error && error.status === 429) {
+      throw error; // Let caller handle rate limits
     }
+    console.error("  Groq API error:", error);
+    return null;
   }
-  return null;
 }
 
 export async function runStage2(options?: { maxItems?: number }) {
