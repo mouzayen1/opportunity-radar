@@ -2,7 +2,7 @@ import { createServerClient } from "@/lib/supabase";
 import type { Product } from "@/lib/types";
 import { TrendingContent } from "./TrendingContent";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export default async function TrendingPage() {
   const supabase = createServerClient();

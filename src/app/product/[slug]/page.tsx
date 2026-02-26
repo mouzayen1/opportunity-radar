@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { Complaint, Product, ProductPainSummary } from "@/lib/types";
 import { ProductDetail } from "./ProductDetail";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export default async function ProductPage({
   params,

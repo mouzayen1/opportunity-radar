@@ -1,7 +1,7 @@
 import { createServerClient } from "@/lib/supabase";
 import { CategoriesGrid } from "./CategoriesGrid";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 interface CategoryData {
   category: string;
