@@ -3,19 +3,33 @@ dotenv.config({ path: ".env.local" });
 import { createServerClient } from "../lib/supabase";
 
 const COMPLAINT_SIGNALS = [
+  // Strong negatives
   "hate", "terrible", "worst", "awful", "horrible", "nightmare",
-  "regret", "waste of money", "scam", "ripoff", "garbage",
+  "regret", "waste of money", "scam", "ripoff", "garbage", "trash",
+  // Switching signals
   "looking for alternative", "switched from", "moving away from",
   "replacing", "ditching", "leaving", "migrating from",
+  "switched to", "moved to", "considering switching",
+  // Feature gaps
   "wish it had", "why can't", "missing feature", "still can't",
-  "been requesting for years", "roadmap but never",
+  "been requesting for years", "roadmap but never", "doesn't support",
+  "no way to", "can't even", "wish they would", "should have",
+  // Pricing pain
   "price increase", "too expensive", "not worth the price",
   "cheaper alternative", "overpriced", "doubled the price",
+  "price hike", "costs too much", "pricing is",
+  // Support pain
   "support is useless", "can't get help", "no response",
   "been waiting", "terrible support", "outsourced support",
-  "alternative to", "frustrated with", "disappointed",
-  "buggy", "crashes", "unreliable", "downtime",
-  "clunky", "unintuitive", "confusing", "hard to use",
+  // Sentiment signals (broader — catches more real complaints)
+  "alternative to", "frustrated", "disappointed", "annoying",
+  "problem with", "issue with", "struggle with", "pain",
+  "sucks", "broken", "slow", "laggy", "bloated",
+  // Reliability
+  "buggy", "crashes", "unreliable", "downtime", "keeps crashing",
+  // UX
+  "clunky", "unintuitive", "confusing", "hard to use", "ugly",
+  "complicated", "not intuitive", "poor ux", "bad ui",
 ];
 
 const NOISE_PATTERNS = [

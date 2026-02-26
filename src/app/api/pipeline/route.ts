@@ -127,8 +127,8 @@ export async function POST(request: NextRequest) {
       }
 
       case "extract": {
-        // Limit to 10 items per run to fit within 60s timeout
-        const result = await runStage2({ maxItems: 10 });
+        // Groq calls are fast (~200ms each), 30 items fits well within 60s timeout
+        const result = await runStage2({ maxItems: 30 });
         return NextResponse.json({
           success: true,
           stage: "AI Extraction",
