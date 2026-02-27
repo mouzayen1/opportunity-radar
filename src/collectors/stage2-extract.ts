@@ -12,7 +12,7 @@ import {
 } from "../lib/product-config";
 import { sleep } from "../lib/utils";
 
-const MAX_PER_RUN = 200;
+const MAX_PER_RUN = 5;
 
 // ============================================
 // Layer 4A: Entity Verification Prompt (binary yes/no)

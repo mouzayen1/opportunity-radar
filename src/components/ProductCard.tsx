@@ -27,21 +27,21 @@ export function ProductCard({
         : null;
 
   return (
-    <div
+    <Link
+      href={`/product/${product.slug}`}
       className={cn(
-        "flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/30",
+        "flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/30 cursor-pointer",
         className
       )}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <Link
-            href={`/product/${product.slug}`}
+          <span
             className="text-sm font-semibold text-foreground hover:text-primary transition-colors line-clamp-1"
           >
             {product.name}
-          </Link>
+          </span>
           {product.category && (
             <span className="mt-0.5 block text-xs text-muted-foreground">
               {product.category}
@@ -92,6 +92,6 @@ export function ProductCard({
           {product.build_this_summary}
         </p>
       )}
-    </div>
+    </Link>
   );
 }
